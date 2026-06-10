@@ -20,6 +20,8 @@ across camera types and environments:
 ## What This Is (and Isn't)
 
 ✅ A feasibility study for pose-based aggression detection on CCTV
+
 ✅ Privacy-conscious by design — skeletons, not faces
+
 ❌ Not a production system — no claims of detecting verbal-only abuse
    or social exclusion, which are invisible to cameras
