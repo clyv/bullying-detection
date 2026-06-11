@@ -60,22 +60,32 @@ def extract_clip(
     scores_seq: list[np.ndarray] = []
     last_centroids = np.full((max_persons, 2), np.nan)
 
-    for result in model.predict(source=str(source), stream=True, conf=conf, device=device, verbose=False):
+    for result in model.predict(
+        source=str(source), stream=True, conf=conf, device=device, verbose=False
+    ):
         kp = np.zeros((max_persons, 17, 2), dtype=np.float32)
         sc = np.zeros((max_persons, 17), dtype=np.float32)
         if result.keypoints is not None and len(result.keypoints):
             xy = result.keypoints.xy.cpu().numpy()  # (n, 17, 2)
             kp_conf = result.keypoints.conf
-            kp_conf = kp_conf.cpu().numpy() if kp_conf is not None else np.ones(xy.shape[:2], np.float32)
-            box_conf = result.boxes.conf.cpu().numpy() if result.boxes is not None else np.ones(len(xy))
+            kp_conf = (
+                kp_conf.cpu().numpy() if kp_conf is not None else np.ones(xy.shape[:2], np.float32)
+            )
+            box_conf = (
+                result.boxes.conf.cpu().numpy() if result.boxes is not None else np.ones(len(xy))
+            )
             top = np.argsort(box_conf)[::-1][:max_persons]
             dets_xy = [xy[i] for i in top]
             dets_sc = [kp_conf[i] for i in top]
-            for det_xy, det_sc, slot in zip(dets_xy, dets_sc, assign_slots(dets_xy, last_centroids)):
+            for det_xy, det_sc, slot in zip(
+                dets_xy, dets_sc, assign_slots(dets_xy, last_centroids)
+            ):
                 kp[slot] = det_xy
                 sc[slot] = det_sc
                 visible = det_sc > 0.1
-                last_centroids[slot] = det_xy[visible].mean(axis=0) if visible.any() else det_xy.mean(axis=0)
+                last_centroids[slot] = (
+                    det_xy[visible].mean(axis=0) if visible.any() else det_xy.mean(axis=0)
+                )
         keypoints_seq.append(kp)
         scores_seq.append(sc)
 
@@ -97,7 +107,8 @@ def find_sources(input_path: Path) -> list[Path]:
     if any(p.suffix.lower() in IMAGE_EXTS for p in input_path.iterdir()):
         return [input_path]  # one clip stored as frames
     return sorted(
-        d for d in input_path.iterdir()
+        d
+        for d in input_path.iterdir()
         if d.is_dir() and any(p.suffix.lower() in IMAGE_EXTS for p in d.iterdir())
     )
 
@@ -106,9 +117,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--input", type=Path, required=True, help="video file, directory of videos, or directory of frames")
-    parser.add_argument("--output", type=Path, required=True, help="output directory for .npz files")
-    parser.add_argument("--model", default="yolov8m-pose.pt", help="any ultralytics *-pose checkpoint")
+    parser.add_argument(
+        "--input",
+        type=Path,
+        required=True,
+        help="video file, directory of videos, or directory of frames",
+    )
+    parser.add_argument(
+        "--output", type=Path, required=True, help="output directory for .npz files"
+    )
+    parser.add_argument(
+        "--model", default="yolov8m-pose.pt", help="any ultralytics *-pose checkpoint"
+    )
     parser.add_argument("--max-persons", type=int, default=2)
     parser.add_argument("--conf", type=float, default=0.25, help="detection confidence threshold")
     parser.add_argument("--device", default=None, help='e.g. "0" for first GPU, "cpu"')
@@ -125,7 +145,9 @@ def main() -> None:
     for src in sources:
         keypoints, scores = extract_clip(model, src, args.max_persons, args.conf, args.device)
         out_path = args.output / f"{src.stem}.npz"
-        np.savez_compressed(out_path, keypoints=keypoints, scores=scores, source=str(src), model=args.model)
+        np.savez_compressed(
+            out_path, keypoints=keypoints, scores=scores, source=str(src), model=args.model
+        )
         print(f"{src} -> {out_path}  ({len(keypoints)} frames)")
 
 

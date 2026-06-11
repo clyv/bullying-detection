@@ -60,7 +60,9 @@ def parse_skeleton_file(path: Path) -> list[list[dict]]:
         bodies = []
         for _ in range(int(next(tokens))):
             body_id = next(tokens)
-            for _ in range(9):  # clipedEdges, hand confidences/states, isRestricted, lean x/y, trackingState
+            for _ in range(
+                9
+            ):  # clipedEdges, hand confidences/states, isRestricted, lean x/y, trackingState
                 next(tokens)
             n_joints = int(next(tokens))
             joints = np.array(
@@ -72,10 +74,14 @@ def parse_skeleton_file(path: Path) -> list[list[dict]]:
 
 
 def _motion(track: np.ndarray) -> float:
-    """Total 3D positional variance of a body track — ghost skeletons score near zero."""
+    """Temporal variance of a body's joint positions — static ghost skeletons score near zero.
+
+    Variance is taken over time per joint/axis and then summed, so the static
+    spread between coordinates doesn't drown out actual movement.
+    """
     pts = track[:, :, :3]
     pts = pts[~np.isnan(pts).any(axis=(1, 2))]
-    return float(pts.var()) if len(pts) else 0.0
+    return float(pts.var(axis=0).sum()) if len(pts) else 0.0
 
 
 def to_sequence(
@@ -141,7 +147,9 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--input", type=Path, required=True, help=".skeleton file or directory")
-    parser.add_argument("--output", type=Path, required=True, help="output directory for .npz files")
+    parser.add_argument(
+        "--output", type=Path, required=True, help="output directory for .npz files"
+    )
     parser.add_argument("--mode", choices=("color", "project"), default="color")
     parser.add_argument(
         "--classes",

@@ -95,10 +95,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--input", type=Path, required=True, help=".npy event file or directory tree")
+    parser.add_argument(
+        "--input", type=Path, required=True, help=".npy event file or directory tree"
+    )
     parser.add_argument("--output", type=Path, required=True, help="output directory")
-    parser.add_argument("--window-ms", type=float, default=33.0, help="accumulation window (default ≈30 fps)")
-    parser.add_argument("--png", action="store_true", help="also dump per-frame PNGs for pose extraction / inspection")
+    parser.add_argument(
+        "--window-ms", type=float, default=33.0, help="accumulation window (default ≈30 fps)"
+    )
+    parser.add_argument(
+        "--png",
+        action="store_true",
+        help="also dump per-frame PNGs for pose extraction / inspection",
+    )
     args = parser.parse_args()
 
     files = [args.input] if args.input.is_file() else sorted(args.input.rglob("*.npy"))

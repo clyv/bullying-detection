@@ -1,5 +1,7 @@
 # School-Safe Vision 🎥🛡️
 
+[![CI](https://github.com/clyv/bullying-detection/actions/workflows/ci.yml/badge.svg)](https://github.com/clyv/bullying-detection/actions/workflows/ci.yml)
+
 A computer vision research project exploring whether bullying, harassment,
 and physical aggression can be detected from school surveillance cameras
 using visual signals alone — no audio, no identity recognition.
@@ -84,6 +86,9 @@ python -m src.preprocessing.ntu_skeleton    --input data/ntu/skeletons --output 
 
 All three converge on the same `.npz` format: `keypoints (T, M, 17, 2)`
 COCO-order pixel coordinates plus `scores (T, M, 17)` confidences.
+
+The numpy-only preprocessing logic is unit-tested (no GPU or model weights
+needed): `pip install pytest ruff && pytest`. The same checks run in CI.
 
 ## Roadmap
 

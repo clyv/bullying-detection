@@ -1,0 +1,12 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    # Note: torch/torchvision are deliberately pinned to cu128 builds for
+    # RTX 50-series GPUs — close any Dependabot PR that breaks that pairing.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
