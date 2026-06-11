@@ -1,12 +1,19 @@
+# Routine version-update PRs are disabled (open-pull-requests-limit: 0) to
+# keep the repo to a single branch — Dependabot security alerts and security
+# fix PRs are unaffected and will still appear when a real vulnerability hits.
+# To re-enable monthly version bumps, raise the limits below.
+#
+# Note: torch/torchvision are deliberately pinned to paired cu128 builds for
+# RTX 50-series GPUs — never bump one without the other.
 version: 2
 updates:
   - package-ecosystem: pip
     directory: /
     schedule:
       interval: monthly
-    # Note: torch/torchvision are deliberately pinned to cu128 builds for
-    # RTX 50-series GPUs — close any Dependabot PR that breaks that pairing.
+    open-pull-requests-limit: 0
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    open-pull-requests-limit: 0
