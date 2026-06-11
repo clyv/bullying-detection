@@ -1,0 +1,23 @@
+# Python 3.12 (3.14 previously caused compatibility issues with this stack).
+#
+# PyTorch: cu128 builds are required for RTX 50-series (Blackwell, sm_120).
+# On CPU-only or pre-Blackwell machines, drop the +cu128 suffixes and the
+# extra index line and install the matching plain builds instead.
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.7.1+cu128
+torchvision==0.22.1+cu128
+
+numpy==2.2.6
+opencv-python==4.10.0.84
+ultralytics>=8.3,<9          # YOLO-Pose for RGB / pseudo-frame pose extraction
+pandas==2.2.3
+scikit-learn==1.5.2
+matplotlib==3.9.2
+tqdm==4.67.1
+PyYAML==6.0.2
+tensorboard==2.18.0
+
+# Optional — raw DVS event tooling for Bullying10K (plain numpy accumulation
+# in src/preprocessing/dvs_to_frames.py works without these):
+# tonic
+# spikingjelly

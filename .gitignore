@@ -1,0 +1,31 @@
+# Datasets & outputs — never commit data (NTU's release agreement forbids redistribution)
+data/*
+!data/README.md
+outputs/
+runs/
+weights/
+*.pt
+*.pth
+*.onnx
+
+# Local agent instructions — intentionally kept out of the repo
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# IDE / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
