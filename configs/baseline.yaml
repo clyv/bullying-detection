@@ -1,0 +1,28 @@
+# Phase 1 baseline — pose extraction + ST-GCN on UT-Interaction (see README roadmap)
+experiment: phase1_baseline
+
+data:
+  dataset: ut_interaction        # ut_interaction | rwf2000
+  root: data/ut_interaction
+  pose_cache: outputs/ut_poses   # .npz files from src/preprocessing/pose_extraction.py
+  num_frames: 64                 # temporal window fed to the model
+  max_persons: 2
+
+pose:
+  model: yolov8m-pose.pt
+  conf_threshold: 0.25
+
+model:
+  name: stgcn
+  num_classes: 6                 # UT-Interaction: shake-hands, point, hug, push, kick, punch
+  graph: coco17
+  in_channels: 2                 # (x, y); add per-joint confidence as a 3rd channel later
+
+training:
+  batch_size: 16
+  epochs: 80
+  lr: 0.01
+  weight_decay: 0.0001
+  scheduler: cosine
+  device: cuda                   # RTX 5060 → requires the cu128 torch build
+  seed: 42
