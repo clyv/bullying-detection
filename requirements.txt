@@ -9,7 +9,7 @@ torchvision==0.22.1+cu128
 
 numpy==2.2.6
 opencv-python==4.10.0.84
-ultralytics>=8.3,<9          # YOLO-Pose for RGB / pseudo-frame pose extraction
+ultralytics>=8.4.64,<9          # YOLO-Pose for RGB / pseudo-frame pose extraction
 pandas==2.2.3
 scikit-learn==1.5.2
 matplotlib==3.9.2
