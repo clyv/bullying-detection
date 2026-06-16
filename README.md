@@ -87,12 +87,21 @@ python -m src.preprocessing.ntu_skeleton    --input data/ntu/skeletons --output 
 All three converge on the same `.npz` format: `keypoints (T, M, 17, 2)`
 COCO-order pixel coordinates plus `scores (T, M, 17)` confidences.
 
-The numpy-only preprocessing logic is unit-tested (no GPU or model weights
-needed): `pip install pytest ruff && pytest`. The same checks run in CI.
+Train and evaluate the ST-GCN baseline against the pose cache, configured
+through [configs/baseline.yaml](configs/baseline.yaml):
+
+```
+python -m src.training.train                  # trains, checkpoints to outputs/checkpoints/
+python -m src.evaluation.evaluate             # accuracy + per-class confusion matrix
+```
+
+The preprocessing and metrics logic is unit-tested (`pip install pytest ruff
+&& pytest`); the model and training/evaluation paths are covered too. The same
+checks run in CI on every push.
 
 ## Roadmap
 
-- [ ] **Phase 1 — Baseline:** pose-extraction pipeline (YOLO-Pose) + ST-GCN baseline on UT-Interaction / RWF-2000
+- [x] **Phase 1 — Baseline:** pose-extraction pipeline (YOLO-Pose) + ST-GCN baseline (training & evaluation) on UT-Interaction / RWF-2000
 - [ ] **Phase 2 — Bullying10K:** DVS events → pseudo-frames → poses, or the dataset's provided COCO pose labels
 - [ ] **Phase 3 — NTU mutual actions:** relevant-class subset, 3D → 2D projection, added to the unified training set
 - [ ] **Phase 4 — Unified model:** cross-dataset evaluation, per-dataset ablations, aggressive-vs-neutral confusion analysis
