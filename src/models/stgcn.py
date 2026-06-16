@@ -12,12 +12,14 @@ class SpatialGraphConv(nn.Module):
         self.conv = nn.Conv2d(in_channels, out_channels * k_size, kernel_size=1)
 
     def forward(self, x, A):
-        # x shape: (N, C, T, V, M)
+        # x shape: (N, C, T, V, M). The 1x1 conv acts per (t, v), so fold the
+        # person axis M into the batch to get a 4-D tensor Conv2d accepts.
         N, C, T, V, M = x.size()
-        x = self.conv(x)  # -> (N, out_channels * k_size, T, V, M)
-        x = x.view(N, self.k_size, -1, T, V, M)
+        x = x.permute(0, 4, 1, 2, 3).contiguous().view(N * M, C, T, V)
+        x = self.conv(x)  # -> (N*M, out_channels * k_size, T, V)
+        x = x.view(N, M, self.k_size, -1, T, V).permute(0, 2, 3, 4, 5, 1)
 
-        # Matrix clustering across spatial nodes
+        # Aggregate across spatial nodes per adjacency partition.
         output = torch.einsum("nkctvm,kvw->nctwm", x, A.to(x.device))
         return output.contiguous()
 
@@ -56,24 +58,27 @@ class STGCNBlock(nn.Module):
 
     def forward(self, x):
         N, C, T, V, M = x.size()
-        res = self.residual(x.view(N, C, T, V * M)).view(N, -1, T, V, M)
+        # Residual is computed in 4-D (N, C, T, V*M) space; it is either a tensor
+        # of the block's output shape or the int 0 (when residual=False).
+        res = self.residual(x.view(N, C, T, V * M))
 
         x = self.gcn(x, self.A)
         x = x.view(N, -1, T, V * M)
-        x = self.tcn(x)
-        x = x.view(N, -1, T, V, M) + res
+        x = self.tcn(x)  # temporal stride may shrink T
+        x = x + res
+        x = x.view(N, -1, x.size(2), V, M)
         return self.relu(x)
 
 
 class STGCNBaseline(nn.Module):
     """Full Spatio-Temporal Graph Convolutional Network baseline model."""
 
-    def __init__(self, in_channels=3, num_classes=2, graph_strategy="spatial"):
+    def __init__(self, in_channels=3, num_classes=2, num_persons=2, graph_strategy="spatial"):
         super().__init__()
         self.graph = Graph(strategy=graph_strategy)
         A = self.graph.A
 
-        self.data_bn = nn.BatchNorm1d(in_channels * self.graph.num_node * 2)
+        self.data_bn = nn.BatchNorm1d(in_channels * self.graph.num_node * num_persons)
 
         self.layer1 = STGCNBlock(in_channels, 64, A, residual=False)
         self.layer2 = STGCNBlock(64, 64, A)
@@ -93,6 +98,7 @@ class STGCNBaseline(nn.Module):
         x = self.layer3(x)
         x = self.layer4(x)
 
-        x = nn.functional.avg_pool3d(x, kernel_size=x.size()[2:])
-        x = self.fcn(x.squeeze(-1).squeeze(-1))
-        return x.squeeze(-1)
+        # Global pool over the remaining (T, V, M) dims, then classify.
+        x = nn.functional.avg_pool3d(x, kernel_size=x.size()[2:])  # (N, 256, 1, 1, 1)
+        x = self.fcn(x.view(N, -1, 1, 1))  # Conv2d needs 4-D -> (N, num_classes, 1, 1)
+        return x.view(N, -1)  # (N, num_classes)

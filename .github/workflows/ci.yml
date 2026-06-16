@@ -13,9 +13,10 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      # Only the pure-numpy logic is tested in CI — torch/ultralytics are
-      # imported lazily in the source precisely so this stays fast and GPU-free.
-      - run: pip install numpy ruff pytest
+      # CPU-only torch keeps CI GPU-free and fast; ultralytics is still imported
+      # lazily in the source so it never needs installing here.
+      - run: pip install numpy ruff pytest pyyaml
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest -v

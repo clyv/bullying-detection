@@ -16,7 +16,7 @@ model:
   name: stgcn
   num_classes: 6                 # UT-Interaction: shake-hands, point, hug, push, kick, punch
   graph: coco17
-  in_channels: 2                 # (x, y); add per-joint confidence as a 3rd channel later
+  in_channels: 3                 # (x, y) coordinates + per-joint confidence score
 
 training:
   batch_size: 16

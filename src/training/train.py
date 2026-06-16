@@ -25,6 +25,8 @@ def train_model():
     lr = config["training"]["lr"]
     weight_decay = config["training"]["weight_decay"]
     num_classes = config["model"]["num_classes"]
+    in_channels = config["model"]["in_channels"]
+    num_persons = config["data"]["max_persons"]
 
     # Checkpoint configuration handling
     checkpoint_dir = "outputs/checkpoints"
@@ -40,7 +42,8 @@ def train_model():
 
     if len(full_dataset) == 0:
         print(
-            "⚠️ Warning: No preprocessed .npz files found. Training on synthetic smoke data for validation."
+            f"[warning] No .npz files found in {pose_cache}. "
+            "Run pose extraction first (see README), then re-run training."
         )
         return
 
@@ -49,14 +52,15 @@ def train_model():
     train_size = len(full_dataset) - val_size
     train_set, val_set = random_split(full_dataset, [train_size, val_size])
 
-    train_loader = DataLoader(
-        train_set, batch_size=batch_size, shuffle=True, drop_last=False
-    )
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, drop_last=False)
     val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
 
-    # 4. Model Instantiation using upscaled 3-channels (X, Y, score)
+    # 4. Model Instantiation (channels = X, Y, score; persons per the config)
     model = STGCNBaseline(
-        in_channels=3, num_classes=num_classes, graph_strategy="spatial"
+        in_channels=in_channels,
+        num_classes=num_classes,
+        num_persons=num_persons,
+        graph_strategy="spatial",
     ).to(device)
 
     criterion = nn.CrossEntropyLoss()
@@ -117,9 +121,7 @@ def train_model():
 
         # Save checkpoint weights periodically or on final step
         if epoch % 10 == 0 or epoch == epochs:
-            checkpoint_path = os.path.join(
-                checkpoint_dir, f"stgcn_baseline_epoch_{epoch}.pt"
-            )
+            checkpoint_path = os.path.join(checkpoint_dir, f"stgcn_baseline_epoch_{epoch}.pt")
             torch.save(
                 {
                     "epoch": epoch,
@@ -129,9 +131,9 @@ def train_model():
                 },
                 checkpoint_path,
             )
-            print(f"💾 Checkpoint saved to {checkpoint_path}")
+            print(f"[checkpoint] saved to {checkpoint_path}")
 
-    print("Phase 1 training loop execution successfully completed! 🎉")
+    print("Phase 1 training loop completed.")
 
 
 if __name__ == "__main__":

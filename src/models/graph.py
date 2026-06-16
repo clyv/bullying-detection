@@ -34,7 +34,7 @@ class Graph:
         self.A = self.get_adjacency_matrix()
 
     def get_adjacency_matrix(self):
-        I = np.eye(self.num_node)
+        identity = np.eye(self.num_node)
         A_binary = np.zeros((self.num_node, self.num_node))
         for i, j in self.edges:
             A_binary[i, j] = 1
@@ -42,15 +42,15 @@ class Graph:
 
         if self.strategy == "uniform":
             A = np.zeros((1, self.num_node, self.num_node))
-            A[0] = A_binary + I
+            A[0] = A_binary + identity
             return torch.tensor(A, dtype=torch.float32)
 
         elif self.strategy == "spatial":
             # Partition Subsets: 0=Self-loops, 1=Symmetric neighborhood links
             A = np.zeros((3, self.num_node, self.num_node))
-            A[0] = I
+            A[0] = identity
             A[1] = A_binary
             A[2] = A_binary * 0.5  # Symmetrical extension mapping
             return torch.tensor(A, dtype=torch.float32)
 
-        return torch.tensor(A_binary + I, dtype=torch.float32).unsqueeze(0)
+        return torch.tensor(A_binary + identity, dtype=torch.float32).unsqueeze(0)

@@ -1,6 +1,6 @@
-import pytest
-import torch
 import numpy as np
+import torch
+
 from src.models.graph import Graph
 from src.models.stgcn import STGCNBaseline
 from src.datasets.unified_loader import UnifiedSkeletonDataset
