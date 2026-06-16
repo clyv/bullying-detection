@@ -4,8 +4,8 @@
 # On CPU-only or pre-Blackwell machines, drop the +cu128 suffixes and the
 # extra index line and install the matching plain builds instead.
 --extra-index-url https://download.pytorch.org/whl/cu128
-torch==2.7.1+cu128
-torchvision==0.22.1+cu128
+torch==2.11.0+cu128
+torchvision==0.26.0+cu128
 
 numpy==2.4.6
 opencv-python==4.10.0.84
