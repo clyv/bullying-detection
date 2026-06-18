@@ -79,20 +79,28 @@ Fetch datasets following [data/README.md](data/README.md), then run the
 preprocessing for whichever sources you have:
 
 ```
-python -m src.preprocessing.pose_extraction --input data/ut_interaction --output outputs/ut_poses
-python -m src.preprocessing.dvs_to_frames   --input data/bullying10k   --output outputs/b10k_frames --png
-python -m src.preprocessing.ntu_skeleton    --input data/ntu/skeletons --output outputs/ntu_poses --classes relevant
+# UT-Interaction (RGB) — YOLO-Pose
+python -m src.preprocessing.pose_extraction   --input data/ut_interaction --output outputs/ut_poses
+# NTU RGB+D 120 (3D skeletons) — projected to 2D
+python -m src.preprocessing.ntu_skeleton      --input data/ntu/skeletons  --output outputs/ntu_poses --classes relevant
+# Bullying10K (DVS) — Route B: convert the provided COCO pose labels directly
+python -m src.preprocessing.bullying10k_poses --input data/bullying10k    --output outputs/b10k_poses
+# Bullying10K — Route A: accumulate events to pseudo-frames, then extract poses
+python -m src.preprocessing.dvs_to_frames     --input data/bullying10k    --output outputs/b10k_frames --png
+python -m src.preprocessing.pose_extraction   --input outputs/b10k_frames --output outputs/b10k_poses
 ```
 
-All three converge on the same `.npz` format: `keypoints (T, M, 17, 2)`
-COCO-order pixel coordinates plus `scores (T, M, 17)` confidences.
+Every route converges on the same `.npz` format: `keypoints (T, M, 17, 2)`
+COCO-order pixel coordinates plus `scores (T, M, 17)` confidences (dataset
+converters also write an integer `label`).
 
-Train and evaluate the ST-GCN baseline against the pose cache, configured
-through [configs/baseline.yaml](configs/baseline.yaml):
+Train and evaluate the ST-GCN baseline against a pose cache, configured through
+a YAML file ([configs/baseline.yaml](configs/baseline.yaml) for UT-Interaction,
+[configs/bullying10k.yaml](configs/bullying10k.yaml) for Bullying10K):
 
 ```
-python -m src.training.train                  # trains, checkpoints to outputs/checkpoints/
-python -m src.evaluation.evaluate             # accuracy + per-class confusion matrix
+python -m src.training.train      --config configs/bullying10k.yaml   # checkpoints to outputs/checkpoints/
+python -m src.evaluation.evaluate --config configs/bullying10k.yaml   # accuracy + per-class confusion matrix
 ```
 
 The preprocessing and metrics logic is unit-tested (`pip install pytest ruff
@@ -102,7 +110,7 @@ checks run in CI on every push.
 ## Roadmap
 
 - [x] **Phase 1 — Baseline:** pose-extraction pipeline (YOLO-Pose) + ST-GCN baseline (training & evaluation) on UT-Interaction / RWF-2000
-- [ ] **Phase 2 — Bullying10K:** DVS events → pseudo-frames → poses, or the dataset's provided COCO pose labels
+- [x] **Phase 2 — Bullying10K:** DVS events → pseudo-frames → poses, or the dataset's provided COCO pose labels → unified `.npz`
 - [ ] **Phase 3 — NTU mutual actions:** relevant-class subset, 3D → 2D projection, added to the unified training set
 - [ ] **Phase 4 — Unified model:** cross-dataset evaluation, per-dataset ablations, aggressive-vs-neutral confusion analysis
 - [ ] **Phase 5 (stretch):** temporal localization — *when* in a stream an incident occurs

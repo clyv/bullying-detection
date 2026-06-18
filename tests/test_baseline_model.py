@@ -35,3 +35,17 @@ def test_loader_padding_and_truncation(tmp_path):
     tensor_data, label = dataset[0]
     assert tensor_data.shape == (3, 150, 17, 2)  # (C, T, V, M)
     assert label.item() == 1  # Derived correctly from file signature name
+
+
+def test_loader_prefers_stored_label(tmp_path):
+    # A converter-written 'label' field overrides filename parsing.
+    file_path = tmp_path / "anything.npz"
+    np.savez(
+        file_path,
+        keypoints=np.zeros((10, 2, 17, 2)),
+        scores=np.zeros((10, 2, 17)),
+        label=7,
+    )
+    dataset = UnifiedSkeletonDataset(data_dir=str(tmp_path), target_frames=16)
+    _, label = dataset[0]
+    assert label.item() == 7

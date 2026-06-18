@@ -3,9 +3,17 @@ import numpy as np
 from src.evaluation.evaluate import (
     accuracy,
     confusion_matrix,
+    format_report,
     latest_checkpoint,
     per_class_precision_recall,
 )
+
+
+def test_format_report_uses_supplied_class_names():
+    cm = confusion_matrix(np.array([0, 1]), np.array([0, 1]), num_classes=2)
+    report = format_report(cm, 1.0, class_names=["slapping", "walking"])
+    assert "slapping" in report and "walking" in report
+    assert "Accuracy: 100.00%" in report
 
 
 def test_accuracy():

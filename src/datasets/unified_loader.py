@@ -55,7 +55,12 @@ class UnifiedSkeletonDataset(Dataset):
         kp = data["keypoints"]  # Shape: (T, M, 17, 2)
         scores = data["scores"]  # Shape: (T, M, 17)
 
-        label = label_from_filename(file_path)
+        # Prefer an explicit label written by a dataset converter (e.g.
+        # bullying10k_poses.py); fall back to parsing it from the filename.
+        if "label" in data:
+            label = int(data["label"])
+        else:
+            label = label_from_filename(file_path)
 
         T, M, V, _ = kp.shape
 

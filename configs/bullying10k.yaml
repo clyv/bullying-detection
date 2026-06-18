@@ -1,0 +1,33 @@
+# Phase 2 — Bullying10K integration. Same ST-GCN baseline as Phase 1, trained
+# on Bullying10K's 10 action classes (see src/preprocessing/bullying10k_poses.py).
+experiment: phase2_bullying10k
+
+data:
+  dataset: bullying10k
+  root: data/bullying10k
+  pose_cache: outputs/b10k_poses   # .npz from bullying10k_poses.py OR pose_extraction.py on pseudo-frames
+  num_frames: 64
+  max_persons: 2
+
+pose:
+  # Route A (events -> pseudo-frames -> YOLO-Pose). Ignored when using the
+  # provided COCO pose labels directly (Route B, bullying10k_poses.py).
+  model: yolov8m-pose.pt
+  conf_threshold: 0.25
+
+model:
+  name: stgcn
+  num_classes: 10
+  class_names: [slapping, punching, kicking, strangling, hair_grab,
+                pushing, walking, greeting, handshake, finger_guessing]
+  graph: coco17
+  in_channels: 3                   # (x, y) + per-joint confidence
+
+training:
+  batch_size: 16
+  epochs: 80
+  lr: 0.01
+  weight_decay: 0.0001
+  scheduler: cosine
+  device: cuda
+  seed: 42

@@ -1,16 +1,18 @@
+import argparse
 import os
-import yaml
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import yaml
 from torch.utils.data import DataLoader, random_split
+
 from src.datasets.unified_loader import UnifiedSkeletonDataset
 from src.models.stgcn import STGCNBaseline
 
 
-def train_model():
-    # 1. Load your intact configs/baseline.yaml layout
-    config_path = "configs/baseline.yaml"
+def train_model(config_path="configs/baseline.yaml"):
+    # 1. Load the experiment config (UT-Interaction baseline by default)
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Configuration file missing at {config_path}")
 
@@ -137,4 +139,6 @@ def train_model():
 
 
 if __name__ == "__main__":
-    train_model()
+    parser = argparse.ArgumentParser(description="Train the ST-GCN baseline.")
+    parser.add_argument("--config", default="configs/baseline.yaml")
+    train_model(parser.parse_args().config)

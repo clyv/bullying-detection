@@ -14,7 +14,8 @@ pose:
 
 model:
   name: stgcn
-  num_classes: 6                 # UT-Interaction: shake-hands, point, hug, push, kick, punch
+  num_classes: 6                 # UT-Interaction
+  class_names: [handshake, hug, kick, point, punch, push]
   graph: coco17
   in_channels: 3                 # (x, y) coordinates + per-joint confidence score
 

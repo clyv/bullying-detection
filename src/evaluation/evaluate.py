@@ -53,11 +53,14 @@ def per_class_precision_recall(cm: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return precision, recall
 
 
-def format_report(cm: np.ndarray, acc: float) -> str:
+def format_report(cm: np.ndarray, acc: float, class_names: list[str] | None = None) -> str:
     precision, recall = per_class_precision_recall(cm)
     lines = [f"Accuracy: {acc * 100:.2f}%  (n={int(cm.sum())})", "", "Per-class:"]
     for idx in range(cm.shape[0]):
-        name = IDX_TO_CLASS.get(idx, f"class_{idx}")
+        if class_names and idx < len(class_names):
+            name = class_names[idx]
+        else:
+            name = IDX_TO_CLASS.get(idx, f"class_{idx}")
         lines.append(
             f"  {idx} {name:<10} support={int(cm[idx].sum()):<4} "
             f"precision={precision[idx]:.2f} recall={recall[idx]:.2f}"
@@ -121,7 +124,7 @@ def evaluate(
 
     cm = confusion_matrix(np.array(preds), np.array(targets), num_classes)
     acc = accuracy(np.array(preds), np.array(targets))
-    print(format_report(cm, acc))
+    print(format_report(cm, acc, config["model"].get("class_names")))
     return {"accuracy": acc, "confusion_matrix": cm}
 
 
