@@ -94,25 +94,36 @@ Every route converges on the same `.npz` format: `keypoints (T, M, 17, 2)`
 COCO-order pixel coordinates plus `scores (T, M, 17)` confidences (dataset
 converters also write an integer `label`).
 
-Train and evaluate the ST-GCN baseline against a pose cache, configured through
-a YAML file ([configs/baseline.yaml](configs/baseline.yaml) for UT-Interaction,
-[configs/bullying10k.yaml](configs/bullying10k.yaml) for Bullying10K):
+Train and evaluate the ST-GCN baseline on a single dataset, configured through a
+YAML file ([configs/baseline.yaml](configs/baseline.yaml) for UT-Interaction,
+[configs/bullying10k.yaml](configs/bullying10k.yaml) for Bullying10K,
+[configs/ntu.yaml](configs/ntu.yaml) for NTU):
 
 ```
 python -m src.training.train      --config configs/bullying10k.yaml   # checkpoints to outputs/checkpoints/
 python -m src.evaluation.evaluate --config configs/bullying10k.yaml   # accuracy + per-class confusion matrix
 ```
 
+For the **unified model** ([configs/unified.yaml](configs/unified.yaml)), every
+dataset's native classes are collapsed to a binary *aggressive vs. neutral* space
+([src/datasets/taxonomy.py](src/datasets/taxonomy.py)). One command runs the
+pooled aggressive-vs-neutral confusion analysis and the leave-one-dataset-out
+cross-dataset / ablation study:
+
+```
+python -m src.evaluation.cross_dataset --config configs/unified.yaml
+```
+
 The preprocessing and metrics logic is unit-tested (`pip install pytest ruff
-&& pytest`); the model and training/evaluation paths are covered too. The same
-checks run in CI on every push.
+&& pytest`); the model, training, single- and cross-dataset evaluation paths are
+covered too. The same checks run in CI on every push.
 
 ## Roadmap
 
 - [x] **Phase 1 — Baseline:** pose-extraction pipeline (YOLO-Pose) + ST-GCN baseline (training & evaluation) on UT-Interaction / RWF-2000
 - [x] **Phase 2 — Bullying10K:** DVS events → pseudo-frames → poses, or the dataset's provided COCO pose labels → unified `.npz`
-- [ ] **Phase 3 — NTU mutual actions:** relevant-class subset, 3D → 2D projection, added to the unified training set
-- [ ] **Phase 4 — Unified model:** cross-dataset evaluation, per-dataset ablations, aggressive-vs-neutral confusion analysis
+- [x] **Phase 3 — NTU mutual actions:** relevant-class subset, 3D → 2D projection, unified labels, added to the training set
+- [x] **Phase 4 — Unified model:** binary aggressive-vs-neutral space, cross-dataset evaluation, per-dataset (leave-one-out) ablations, confusion analysis
 - [ ] **Phase 5 (stretch):** temporal localization — *when* in a stream an incident occurs
 
 ## Limitations

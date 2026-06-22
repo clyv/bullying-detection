@@ -34,16 +34,36 @@ N_KINECT_JOINTS = 25
 KINECT25_TO_COCO17 = np.array([3, 3, 3, 3, 3, 4, 8, 5, 9, 6, 10, 12, 16, 13, 17, 14, 18])
 COCO_FACE_SLOTS = [1, 2, 3, 4]
 
-# NTU action ids relevant to aggression detection (mutual actions unless noted)
+# NTU action ids relevant to aggression detection (mutual actions unless noted),
+# ordered aggressive -> subtle -> neutral so the 0-indexed label is contiguous
+# within each filter group. The index into this list is the unified `label`.
+NTU_RELEVANT = [
+    (50, "punch_slap"),
+    (51, "kicking"),
+    (52, "pushing"),
+    (106, "hit_with_object"),
+    (107, "wield_knife"),
+    (108, "knock_over"),
+    (109, "grab_stuff"),
+    (111, "step_on_foot"),
+    (54, "point_finger"),
+    (93, "shake_fist"),
+    (116, "follow"),
+    (117, "whisper"),
+    (53, "pat_on_back"),
+    (55, "hugging"),
+    (58, "handshake"),
+    (112, "high_five"),
+    (118, "exchange_things"),
+    (119, "support_somebody"),
+]
 AGGRESSIVE = {50, 51, 52, 106, 107, 108, 109, 111}
-#   A50 punch/slap, A51 kicking, A52 pushing, A106 hit with object,
-#   A107 wield knife, A108 knock over, A109 grab stuff, A111 step on foot
 SUBTLE = {54, 93, 116, 117}
-#   A54 point finger, A93 shake fist (single-person), A116 follow, A117 whisper
 NEUTRAL = {53, 55, 58, 112, 118, 119}
-#   A53 pat on back, A55 hugging, A58 handshake, A112 high-five,
-#   A118 exchange things, A119 support somebody
 RELEVANT = AGGRESSIVE | SUBTLE | NEUTRAL
+
+ACTION_TO_LABEL = {action: idx for idx, (action, _) in enumerate(NTU_RELEVANT)}
+ACTION_TO_NAME = {action: name for action, name in NTU_RELEVANT}
 
 
 def parse_name(stem: str) -> dict[str, int]:
@@ -129,16 +149,23 @@ def to_sequence(
 
 def convert_file(src: Path, out_dir: Path, mode: str) -> Path:
     keypoints, scores = to_sequence(parse_skeleton_file(src), mode=mode)
+    action = parse_name(src.stem)["action"]
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{src.stem}.npz"
-    np.savez_compressed(
-        out_path,
+    fields = dict(
         keypoints=keypoints,
         scores=scores,
-        action=parse_name(src.stem)["action"],
+        action=action,
         source=str(src),
         frame_size=(1920, 1080),
     )
+    # Relevant-subset actions get a unified 0-indexed label the loader can train
+    # on directly; out-of-subset ("all" mode) clips carry only the raw action id.
+    if action in ACTION_TO_LABEL:
+        fields["label"] = ACTION_TO_LABEL[action]
+        fields["label_name"] = ACTION_TO_NAME[action]
+        fields["aggressive"] = action in AGGRESSIVE
+    np.savez_compressed(out_path, **fields)
     return out_path
 
 

@@ -1,0 +1,29 @@
+# Phase 3 — NTU RGB+D 120 mutual actions. Same ST-GCN baseline, trained on the
+# 18-class relevant subset (see src/preprocessing/ntu_skeleton.py NTU_RELEVANT).
+experiment: phase3_ntu
+
+data:
+  dataset: ntu
+  root: data/ntu/skeletons
+  pose_cache: outputs/ntu_poses    # .npz from ntu_skeleton.py --classes relevant
+  num_frames: 64
+  max_persons: 2
+
+model:
+  name: stgcn
+  num_classes: 18
+  class_names: [punch_slap, kicking, pushing, hit_with_object, wield_knife,
+                knock_over, grab_stuff, step_on_foot, point_finger, shake_fist,
+                follow, whisper, pat_on_back, hugging, handshake, high_five,
+                exchange_things, support_somebody]
+  graph: coco17
+  in_channels: 3
+
+training:
+  batch_size: 16
+  epochs: 80
+  lr: 0.01
+  weight_decay: 0.0001
+  scheduler: cosine
+  device: cuda
+  seed: 42

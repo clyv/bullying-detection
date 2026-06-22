@@ -1,0 +1,26 @@
+# Phase 4 — unified aggressive-vs-neutral model across all datasets.
+# Each dataset's native classes are collapsed to binary via src/datasets/taxonomy.py.
+experiment: phase4_unified
+
+data:
+  num_frames: 64
+  max_persons: 2
+  datasets:
+    - {name: ut_interaction, cache: outputs/ut_poses}
+    - {name: bullying10k,    cache: outputs/b10k_poses}
+    - {name: ntu,            cache: outputs/ntu_poses}
+
+model:
+  name: stgcn
+  num_classes: 2
+  class_names: [neutral, aggressive]
+  graph: coco17
+  in_channels: 3
+
+training:
+  batch_size: 16
+  epochs: 40
+  lr: 0.01
+  weight_decay: 0.0001
+  device: cuda
+  seed: 42
