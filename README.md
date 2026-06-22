@@ -114,9 +114,20 @@ cross-dataset / ablation study:
 python -m src.evaluation.cross_dataset --config configs/unified.yaml
 ```
 
-The preprocessing and metrics logic is unit-tested (`pip install pytest ruff
-&& pytest`); the model, training, single- and cross-dataset evaluation paths are
-covered too. The same checks run in CI on every push.
+Finally, **temporal localization** answers *when* an incident occurs in a
+continuous stream: it slides the trained binary model over an untrimmed pose
+sequence and merges aggressive windows into incident intervals (frame ranges +
+timestamps) to flag for human review.
+
+```
+python -m src.evaluation.localize --stream outputs/cctv_poses/clip.npz \
+    --checkpoint outputs/checkpoints/stgcn_baseline_epoch_40.pt --config configs/unified.yaml
+```
+
+The preprocessing, metrics, and temporal-localization logic is unit-tested
+(`pip install pytest ruff && pytest`); the model, training, single-/cross-dataset
+evaluation, and stream-localization paths are covered too. The same checks run in
+CI on every push.
 
 ## Roadmap
 
@@ -124,7 +135,7 @@ covered too. The same checks run in CI on every push.
 - [x] **Phase 2 — Bullying10K:** DVS events → pseudo-frames → poses, or the dataset's provided COCO pose labels → unified `.npz`
 - [x] **Phase 3 — NTU mutual actions:** relevant-class subset, 3D → 2D projection, unified labels, added to the training set
 - [x] **Phase 4 — Unified model:** binary aggressive-vs-neutral space, cross-dataset evaluation, per-dataset (leave-one-out) ablations, confusion analysis
-- [ ] **Phase 5 (stretch):** temporal localization — *when* in a stream an incident occurs
+- [x] **Phase 5 (stretch):** temporal localization — sliding-window scoring + incident-interval merging to flag *when* in a stream aggression occurs (school-proxy testing still pending suitable footage)
 
 ## Limitations
 

@@ -24,3 +24,10 @@ training:
   weight_decay: 0.0001
   device: cuda
   seed: 42
+
+# Phase 5 — sliding-window temporal localization on a continuous stream.
+localization:
+  window: 64        # frames per window (match training num_frames)
+  stride: 16        # hop between windows; smaller = finer temporal resolution
+  threshold: 0.5    # aggression probability above which a window is flagged
+  max_gap: 16       # merge incidents separated by <= this many frames
