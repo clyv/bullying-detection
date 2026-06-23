@@ -12,11 +12,17 @@ Output is one .npz per clip, matching ntu_skeleton.py / pose_extraction.py:
     label_name str
     aggressive bool          — True for the six physical-aggression actions
 
-The COCO keypoint convention is 17 joints of (x, y, v) where v==0 means the
-joint is unlabelled. Bullying10K's exact on-disk layout (per-clip .npy/.npz of
-shape (T, M, 17, 3) or a flattened (T, M, 51)) should be confirmed against the
-downloaded release; the core conversion lives in ``coco_to_unified`` and is
-format-agnostic.
+The real Bullying10K release ships a single COCO-style ``train_keypoints.json``
+(``images`` + ``annotations`` + ``categories``) covering every clip, with
+Halpe-26 keypoints (78 values/person) whose first 17 joints are COCO-17 in the
+same order, and the action class encoded in each image ``file_name`` path. When
+``--input`` is (or contains) such a JSON, it is parsed directly; otherwise the
+per-clip array path (``coco_to_unified`` on (T, M, 17, 3) / (T, M, 51) .npy/.npz)
+is used. Both land in the same unified .npz format.
+
+Note: the JSON is large (~1.7 GB / millions of annotations); parsing loads it
+into memory once. Use ``--limit N`` to convert only the first N clips for a
+quick check before processing everything.
 
 Usage:
     python -m src.preprocessing.bullying10k_poses --input data/bullying10k --output outputs/b10k_poses
@@ -25,9 +31,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
+
+N_HALPE_TO_COCO = 17  # first 17 Halpe-26 joints are COCO-17 in the same order
 
 # Canonical Bullying10K action order: six aggressive, then four non-violent.
 BULLYING10K_CLASSES = [
@@ -125,25 +134,106 @@ def convert_file(src: Path, out_dir: Path, max_persons: int = 2) -> Path:
     return out_path
 
 
+def keypoints_to_coco17(flat) -> np.ndarray:
+    """Flat keypoint list (Halpe-26 = 78 vals, or COCO-17 = 51) -> (17, 3) COCO array."""
+    arr = np.asarray(flat, dtype=np.float32).reshape(-1, 3)
+    return arr[:N_HALPE_TO_COCO]
+
+
+def _clip_and_frame(file_name: str) -> tuple[str, int]:
+    """'punching/.../dvSave-XXXX/12.png' -> ('punching/.../dvSave-XXXX', 12)."""
+    parts = file_name.replace("\\", "/").split("/")
+    return "/".join(parts[:-1]), int(Path(parts[-1]).stem)
+
+
+def convert_keypoints_json(json_path: Path, out_dir: Path, max_persons: int = 2, limit=None) -> int:
+    """Parse a Bullying10K COCO ``*_keypoints.json`` into one unified .npz per clip.
+
+    Frames are grouped by their clip directory and ordered by frame index; up to
+    ``max_persons`` people per frame are kept by detection ``score``. ``limit``
+    caps the number of clips converted (for a quick check).
+    """
+    with open(json_path) as f:
+        data = json.load(f)
+
+    id_to_loc = {img["id"]: _clip_and_frame(img["file_name"]) for img in data["images"]}
+
+    # clip -> {frame_index: [(score, (17,3) keypoints), ...]}
+    clips: dict[str, dict[int, list]] = {}
+    for ann in data["annotations"]:
+        loc = id_to_loc.get(ann["image_id"])
+        if loc is None:
+            continue
+        clip, frame = loc
+        kp = keypoints_to_coco17(ann["keypoints"])
+        clips.setdefault(clip, {}).setdefault(frame, []).append((float(ann.get("score", 1.0)), kp))
+    del data, id_to_loc
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    converted = 0
+    for clip in sorted(clips):
+        if limit is not None and converted >= limit:
+            break
+        frames = clips[clip]
+        order = sorted(frames)
+        seq = np.zeros((len(order), max_persons, 17, 3), dtype=np.float32)
+        for ti, fr in enumerate(order):
+            people = sorted(frames[fr], key=lambda sp: sp[0], reverse=True)[:max_persons]
+            for pi, (_score, kp) in enumerate(people):
+                seq[ti, pi] = kp
+
+        keypoints, scores = coco_to_unified(seq, max_persons)
+        label = label_for(clip)
+        out_path = out_dir / (clip.replace("/", "__") + ".npz")
+        fields = dict(keypoints=keypoints, scores=scores, source=clip)
+        if label is not None:
+            fields["label"] = label
+            fields["label_name"] = BULLYING10K_CLASSES[label]
+            fields["aggressive"] = BULLYING10K_CLASSES[label] in AGGRESSIVE
+        np.savez_compressed(out_path, **fields)
+        print(f"{clip} ({len(order)} frames) -> {out_path}")
+        converted += 1
+    return converted
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
-        "--input", type=Path, required=True, help="pose .npy/.npz file or directory tree"
+        "--input",
+        type=Path,
+        required=True,
+        help="*_keypoints.json, or a dir/file of .npy/.npz poses",
     )
     parser.add_argument(
         "--output", type=Path, required=True, help="output directory for unified .npz files"
     )
     parser.add_argument("--max-persons", type=int, default=2)
+    parser.add_argument("--limit", type=int, default=None, help="convert only the first N clips")
     args = parser.parse_args()
 
+    # JSON route: --input is a *_keypoints.json, or a directory containing one.
+    json_files = []
+    if args.input.is_file() and args.input.suffix == ".json":
+        json_files = [args.input]
+    elif args.input.is_dir():
+        json_files = sorted(args.input.glob("*keypoints*.json"))
+    if json_files:
+        total = sum(
+            convert_keypoints_json(jp, args.output, args.max_persons, args.limit)
+            for jp in json_files
+        )
+        print(f"converted {total} clips from {len(json_files)} json file(s)")
+        return
+
+    # Per-clip array route.
     if args.input.is_file():
         files = [args.input]
     else:
         files = sorted(p for p in args.input.rglob("*") if p.suffix in (".npy", ".npz"))
     if not files:
-        raise SystemExit(f"no .npy/.npz pose files under {args.input}")
+        raise SystemExit(f"no *_keypoints.json or .npy/.npz pose files under {args.input}")
 
     converted = 0
     for src in files:
