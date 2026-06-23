@@ -146,6 +146,25 @@ def _clip_and_frame(file_name: str) -> tuple[str, int]:
     return "/".join(parts[:-1]), int(Path(parts[-1]).stem)
 
 
+def _load_json(path: Path):
+    """Load a (possibly multi-GB) JSON, reading in chunks.
+
+    A single ``file.read()`` of a >1 GB file can raise ``OSError: [Errno 22]``
+    on Windows (worsened when the file lives in a OneDrive-synced folder);
+    reading in bounded chunks avoids that path entirely.
+    """
+    parts = []
+    with open(path, "rb") as f:
+        while True:
+            block = f.read(1 << 28)  # 256 MB
+            if not block:
+                break
+            parts.append(block)
+    raw = b"".join(parts)
+    parts.clear()
+    return json.loads(raw)
+
+
 def convert_keypoints_json(json_path: Path, out_dir: Path, max_persons: int = 2, limit=None) -> int:
     """Parse a Bullying10K COCO ``*_keypoints.json`` into one unified .npz per clip.
 
@@ -153,8 +172,7 @@ def convert_keypoints_json(json_path: Path, out_dir: Path, max_persons: int = 2,
     ``max_persons`` people per frame are kept by detection ``score``. ``limit``
     caps the number of clips converted (for a quick check).
     """
-    with open(json_path) as f:
-        data = json.load(f)
+    data = _load_json(json_path)
 
     id_to_loc = {img["id"]: _clip_and_frame(img["file_name"]) for img in data["images"]}
 
