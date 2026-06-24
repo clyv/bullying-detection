@@ -13,20 +13,35 @@ stricter physical-only definition.
 
 from __future__ import annotations
 
+import os
+
 NEUTRAL, AGGRESSIVE = 0, 1
 BINARY_NAMES = ["neutral", "aggressive"]
 
 # UT-Interaction (pose_extraction.py output carries no label, so infer by name).
 UT_AGGRESSIVE = {"kick", "punch", "push"}
 UT_NEUTRAL = {"handshake", "hug", "point"}
+# UT clips are usually named numerically (e.g. "0_11_4"), where the trailing
+# field is the class id: 0 handshake, 1 hug, 2 kick, 3 point, 4 punch, 5 push.
+UT_AGGRESSIVE_IDX = {2, 4, 5}
+UT_NEUTRAL_IDX = {0, 1, 3}
 
 
 def ut_interaction_aggressive(name: str) -> int | None:
     """Binary label for a UT-Interaction clip filename, or None if unrecognised."""
-    stem = name.lower()
+    stem = os.path.basename(name).lower().replace(".npz", "")
     if any(k in stem for k in UT_AGGRESSIVE):
         return AGGRESSIVE
     if any(k in stem for k in UT_NEUTRAL):
+        return NEUTRAL
+    # numeric fallback: trailing field is the UT class id (0-5)
+    try:
+        idx = int(stem.split("_")[-1])
+    except ValueError:
+        return None
+    if idx in UT_AGGRESSIVE_IDX:
+        return AGGRESSIVE
+    if idx in UT_NEUTRAL_IDX:
         return NEUTRAL
     return None
 
