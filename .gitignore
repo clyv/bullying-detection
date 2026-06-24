@@ -7,7 +7,8 @@ weights/
 *.pt
 *.pth
 *.onnx
-*.zip          # dataset archives (e.g. ut_interaction.zip) — far too large for git
+# dataset archives (e.g. ut_interaction.zip) — far too large for git
+*.zip
 
 # Local agent instructions — intentionally kept out of the repo
 CLAUDE.md
