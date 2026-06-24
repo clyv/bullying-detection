@@ -5,9 +5,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import yaml
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Subset
 
-from src.datasets.unified_loader import UnifiedSkeletonDataset
+from src.datasets.unified_loader import UnifiedSkeletonDataset, split_indices
 from src.models.stgcn import STGCNBaseline
 
 
@@ -21,13 +21,20 @@ def fit(
     weight_decay,
     device,
     checkpoint_dir=None,
+    best_path=None,
 ):
-    """Train ``model`` in place and return it. Shared by train.py and cross-dataset eval."""
+    """Train ``model`` in place and return it. Shared by train.py and cross-dataset eval.
+
+    If ``best_path`` is given, the checkpoint with the highest validation accuracy
+    seen so far is (re)saved there each time it improves — so evaluation can use
+    the best-generalizing weights rather than the (overfit) final epoch.
+    """
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     if checkpoint_dir:
         os.makedirs(checkpoint_dir, exist_ok=True)
+    best_acc = -1.0
 
     for epoch in range(1, epochs + 1):
         model.train()
@@ -52,6 +59,13 @@ def fit(
             f"| Val Loss: {v_loss:.4f} Acc: {v_acc:.2f}%"
         )
 
+        if best_path and v_acc > best_acc:
+            best_acc = v_acc
+            torch.save(
+                {"epoch": epoch, "model_state_dict": model.state_dict(), "val_acc": v_acc},
+                best_path,
+            )
+
         if checkpoint_dir and (epoch % 10 == 0 or epoch == epochs):
             path = os.path.join(checkpoint_dir, f"stgcn_baseline_epoch_{epoch}.pt")
             torch.save(
@@ -64,6 +78,8 @@ def fit(
                 path,
             )
             print(f"[checkpoint] saved to {path}")
+    if best_path and best_acc >= 0:
+        print(f"[checkpoint] best val acc {best_acc:.2f}% -> {best_path}")
     return model
 
 
@@ -92,6 +108,9 @@ def train_model(config_path="configs/baseline.yaml"):
     pose_cache = config["data"]["pose_cache"]
     num_frames = config["data"]["num_frames"]
     batch_size = config["training"]["batch_size"]
+    seed = config["training"].get("seed", 42)
+    val_frac = config["data"].get("val_frac", 0.15)
+    test_frac = config["data"].get("test_frac", 0.15)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using execution device: {device}")
@@ -104,10 +123,14 @@ def train_model(config_path="configs/baseline.yaml"):
         )
         return
 
-    val_size = max(1, int(len(full_dataset) * 0.2))
-    train_set, val_set = random_split(full_dataset, [len(full_dataset) - val_size, val_size])
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
+    # Seeded split shared with evaluate.py; the test slice is never seen here.
+    train_idx, val_idx, test_idx = split_indices(len(full_dataset), seed, val_frac, test_frac)
+    print(
+        f"Split (seed={seed}): train={len(train_idx)} val={len(val_idx)} "
+        f"test={len(test_idx)} (test held out for evaluation)"
+    )
+    train_loader = DataLoader(Subset(full_dataset, train_idx), batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(Subset(full_dataset, val_idx), batch_size=batch_size, shuffle=False)
 
     model = STGCNBaseline(
         in_channels=config["model"]["in_channels"],
@@ -126,6 +149,7 @@ def train_model(config_path="configs/baseline.yaml"):
         weight_decay=config["training"]["weight_decay"],
         device=device,
         checkpoint_dir="outputs/checkpoints",
+        best_path="outputs/checkpoints/stgcn_best.pt",
     )
     print("Training loop completed.")
 

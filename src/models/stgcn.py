@@ -73,7 +73,9 @@ class STGCNBlock(nn.Module):
 class STGCNBaseline(nn.Module):
     """Full Spatio-Temporal Graph Convolutional Network baseline model."""
 
-    def __init__(self, in_channels=3, num_classes=2, num_persons=2, graph_strategy="spatial"):
+    def __init__(
+        self, in_channels=3, num_classes=2, num_persons=2, graph_strategy="spatial", dropout=0.3
+    ):
         super().__init__()
         self.graph = Graph(strategy=graph_strategy)
         A = self.graph.A
@@ -85,6 +87,7 @@ class STGCNBaseline(nn.Module):
         self.layer3 = STGCNBlock(64, 128, A, stride=2)
         self.layer4 = STGCNBlock(128, 256, A, stride=2)
 
+        self.dropout = nn.Dropout(dropout)  # light regularization before the classifier
         self.fcn = nn.Conv2d(256, num_classes, kernel_size=1)
 
     def forward(self, x):
@@ -100,5 +103,6 @@ class STGCNBaseline(nn.Module):
 
         # Global pool over the remaining (T, V, M) dims, then classify.
         x = nn.functional.avg_pool3d(x, kernel_size=x.size()[2:])  # (N, 256, 1, 1, 1)
-        x = self.fcn(x.view(N, -1, 1, 1))  # Conv2d needs 4-D -> (N, num_classes, 1, 1)
+        x = self.dropout(x.view(N, -1, 1, 1))  # Conv2d needs 4-D -> (N, 256, 1, 1)
+        x = self.fcn(x)  # (N, num_classes, 1, 1)
         return x.view(N, -1)  # (N, num_classes)

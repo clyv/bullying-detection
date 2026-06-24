@@ -34,6 +34,18 @@ def features_to_tensor(kp, scores, target_frames):
     return torch.tensor(features, dtype=torch.float32).permute(3, 0, 2, 1)
 
 
+def split_indices(n, seed=42, val_frac=0.15, test_frac=0.15):
+    """Deterministic train/val/test index split of ``n`` items (seeded permutation).
+
+    Returns (train_idx, val_idx, test_idx) numpy arrays. The same seed yields the
+    same partition, so training and evaluation agree on the held-out test set.
+    """
+    perm = np.random.default_rng(seed).permutation(n)
+    n_test = int(n * test_frac)
+    n_val = int(n * val_frac)
+    return perm[n_test + n_val :], perm[n_test : n_test + n_val], perm[:n_test]
+
+
 def label_from_filename(filename):
     """Derive a class index from a clip filename.
 
@@ -58,9 +70,11 @@ class UnifiedSkeletonDataset(Dataset):
         self.data_dir = data_dir
         self.target_frames = target_frames
         if os.path.exists(data_dir):
-            self.file_list = [
+            # Sorted for a reproducible order, so split_indices gives the same
+            # train/val/test partition across runs and between train & evaluate.
+            self.file_list = sorted(
                 os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith(".npz")
-            ]
+            )
         else:
             self.file_list = []
 

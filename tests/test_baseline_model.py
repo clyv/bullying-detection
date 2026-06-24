@@ -1,9 +1,22 @@
 import numpy as np
 import torch
 
+from src.datasets.unified_loader import UnifiedSkeletonDataset, split_indices
 from src.models.graph import Graph
 from src.models.stgcn import STGCNBaseline
-from src.datasets.unified_loader import UnifiedSkeletonDataset
+
+
+def test_split_indices_disjoint_complete_and_deterministic():
+    train, val, test = split_indices(100, seed=42, val_frac=0.15, test_frac=0.15)
+    assert len(test) == 15 and len(val) == 15 and len(train) == 70
+    union = set(train) | set(val) | set(test)
+    assert union == set(range(100))  # complete partition
+    assert len(union) == 100  # disjoint (no overlap)
+    # same seed -> identical split; different seed -> different test set
+    train2, _, test2 = split_indices(100, seed=42)
+    assert (test == test2).all() and (train == train2).all()
+    _, _, test3 = split_indices(100, seed=7)
+    assert set(test3) != set(test)
 
 
 def test_graph_adjacency_shape():

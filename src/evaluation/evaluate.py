@@ -1,16 +1,20 @@
 """Evaluate a trained ST-GCN baseline checkpoint on the unified pose cache.
 
-Loads the same configs/baseline.yaml the training run used, restores a
-checkpoint produced by src/training/train.py, runs inference over the pose
-cache, and reports overall accuracy plus a per-class confusion matrix and
-precision/recall — the missing half of the Phase 1 baseline (train + evaluate).
+Loads the same config the training run used, restores a checkpoint produced by
+src/training/train.py, and reports accuracy plus a per-class confusion matrix
+and precision/recall — the missing half of the Phase 1 baseline.
+
+By default it evaluates the **held-out test split** (the same seeded split
+train.py reserves and never trains on) and uses the **best-validation**
+checkpoint, so the reported number is an honest generalization estimate rather
+than training-set memorization. Pass --split all to score the whole cache.
 
 Metrics are computed with plain numpy so this module stays dependency-light
 and unit-testable without a GPU.
 
 Usage:
-    python -m src.evaluation.evaluate                     # newest checkpoint
-    python -m src.evaluation.evaluate --checkpoint outputs/checkpoints/stgcn_baseline_epoch_80.pt
+    python -m src.evaluation.evaluate --config configs/bullying10k.yaml          # test split, best ckpt
+    python -m src.evaluation.evaluate --config configs/bullying10k.yaml --split all
 """
 
 from __future__ import annotations
@@ -74,19 +78,32 @@ def latest_checkpoint(checkpoint_dir: str) -> str | None:
     return max(files, key=os.path.getmtime) if files else None
 
 
+def default_checkpoint(checkpoint_dir: str) -> str | None:
+    """Prefer a *best* checkpoint (best validation accuracy) over the newest epoch."""
+    best = glob.glob(os.path.join(checkpoint_dir, "*best*.pt"))
+    if best:
+        return max(best, key=os.path.getmtime)
+    return latest_checkpoint(checkpoint_dir)
+
+
 def evaluate(
-    config_path: str = "configs/baseline.yaml", checkpoint: str | None = None
+    config_path: str = "configs/baseline.yaml",
+    checkpoint: str | None = None,
+    split: str = "test",
 ) -> dict | None:
-    """Run inference and return {'accuracy', 'confusion_matrix'} (or None if nothing to do)."""
+    """Run inference and return {'accuracy', 'confusion_matrix'} (or None if nothing to do).
+
+    ``split`` is one of "test" (default, held-out), "val", "train", or "all".
+    """
     import yaml
 
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
     import torch
-    from torch.utils.data import DataLoader
+    from torch.utils.data import DataLoader, Subset
 
-    from src.datasets.unified_loader import UnifiedSkeletonDataset
+    from src.datasets.unified_loader import UnifiedSkeletonDataset, split_indices
     from src.models.stgcn import STGCNBaseline
 
     pose_cache = config["data"]["pose_cache"]
@@ -97,7 +114,16 @@ def evaluate(
         print(f"[warning] No .npz files in {pose_cache}; nothing to evaluate.")
         return None
 
-    checkpoint = checkpoint or latest_checkpoint("outputs/checkpoints")
+    if split == "all":
+        subset = dataset
+    else:
+        seed = config["training"].get("seed", 42)
+        val_frac = config["data"].get("val_frac", 0.15)
+        test_frac = config["data"].get("test_frac", 0.15)
+        train_idx, val_idx, test_idx = split_indices(len(dataset), seed, val_frac, test_frac)
+        subset = Subset(dataset, {"train": train_idx, "val": val_idx, "test": test_idx}[split])
+
+    checkpoint = checkpoint or default_checkpoint("outputs/checkpoints")
     if checkpoint is None or not os.path.exists(checkpoint):
         print("[error] No checkpoint found. Train a model first (python -m src.training.train).")
         return None
@@ -113,8 +139,9 @@ def evaluate(
     model.load_state_dict(state["model_state_dict"] if "model_state_dict" in state else state)
     model.eval()
     print(f"Loaded checkpoint: {checkpoint}  (device={device})")
+    print(f"Evaluating on '{split}' split: n={len(subset)}")
 
-    loader = DataLoader(dataset, batch_size=config["training"]["batch_size"], shuffle=False)
+    loader = DataLoader(subset, batch_size=config["training"]["batch_size"], shuffle=False)
     preds, targets = [], []
     with torch.no_grad():
         for tensors, labels in loader:
@@ -134,10 +161,18 @@ def main() -> None:
     )
     parser.add_argument("--config", default="configs/baseline.yaml")
     parser.add_argument(
-        "--checkpoint", default=None, help="defaults to newest in outputs/checkpoints"
+        "--checkpoint",
+        default=None,
+        help="defaults to the best (then newest) in outputs/checkpoints",
+    )
+    parser.add_argument(
+        "--split",
+        default="test",
+        choices=("test", "val", "train", "all"),
+        help="which split to score",
     )
     args = parser.parse_args()
-    evaluate(args.config, args.checkpoint)
+    evaluate(args.config, args.checkpoint, args.split)
 
 
 if __name__ == "__main__":

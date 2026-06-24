@@ -98,8 +98,13 @@ def test_evaluate_end_to_end(tmp_path):
 
     from src.evaluation.evaluate import evaluate
 
-    result = evaluate(config_path=str(cfg_path), checkpoint=str(ckpt))
+    # split="all" scores every clip (n=12); the default "test" split scores a subset.
+    result = evaluate(config_path=str(cfg_path), checkpoint=str(ckpt), split="all")
     assert result is not None
     assert 0.0 <= result["accuracy"] <= 1.0
     assert result["confusion_matrix"].shape == (6, 6)
+    assert result["confusion_matrix"].sum() == 12
+
+    held_out = evaluate(config_path=str(cfg_path), checkpoint=str(ckpt), split="test")
+    assert 0 < held_out["confusion_matrix"].sum() < 12  # only the held-out slice
     assert result["confusion_matrix"].sum() == 12  # every clip classified
