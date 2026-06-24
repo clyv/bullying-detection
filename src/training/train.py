@@ -98,7 +98,14 @@ def _evaluate(model, loader, criterion, device):
     return loss_sum / total, correct / total * 100
 
 
-def train_model(config_path="configs/baseline.yaml"):
+def resolve_device(name="auto"):
+    """'auto' -> cuda if available else cpu; otherwise the named device."""
+    if name in (None, "auto"):
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device(name)
+
+
+def train_model(config_path="configs/baseline.yaml", device="auto"):
     """Train the ST-GCN baseline on a single-dataset pose cache from a YAML config."""
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Configuration file missing at {config_path}")
@@ -111,8 +118,11 @@ def train_model(config_path="configs/baseline.yaml"):
     seed = config["training"].get("seed", 42)
     val_frac = config["data"].get("val_frac", 0.15)
     test_frac = config["data"].get("test_frac", 0.15)
+    # Checkpoints are namespaced per experiment so datasets don't overwrite each other.
+    experiment = config.get("experiment", "default")
+    checkpoint_dir = os.path.join("outputs/checkpoints", experiment)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_device(device)
     print(f"Using execution device: {device}")
     print(f"Loading unified dataset from cache: {pose_cache}")
     full_dataset = UnifiedSkeletonDataset(data_dir=pose_cache, target_frames=num_frames)
@@ -148,13 +158,15 @@ def train_model(config_path="configs/baseline.yaml"):
         lr=config["training"]["lr"],
         weight_decay=config["training"]["weight_decay"],
         device=device,
-        checkpoint_dir="outputs/checkpoints",
-        best_path="outputs/checkpoints/stgcn_best.pt",
+        checkpoint_dir=checkpoint_dir,
+        best_path=os.path.join(checkpoint_dir, "stgcn_best.pt"),
     )
-    print("Training loop completed.")
+    print(f"Training loop completed. Checkpoints in {checkpoint_dir}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train the ST-GCN baseline.")
     parser.add_argument("--config", default="configs/baseline.yaml")
-    train_model(parser.parse_args().config)
+    parser.add_argument("--device", default="auto", help='"auto", "cpu", or "cuda"')
+    args = parser.parse_args()
+    train_model(args.config, args.device)

@@ -90,10 +90,12 @@ def evaluate(
     config_path: str = "configs/baseline.yaml",
     checkpoint: str | None = None,
     split: str = "test",
+    device: str = "auto",
 ) -> dict | None:
     """Run inference and return {'accuracy', 'confusion_matrix'} (or None if nothing to do).
 
     ``split`` is one of "test" (default, held-out), "val", "train", or "all".
+    ``device`` is "auto" (cuda if available else cpu), "cpu", or "cuda".
     """
     import yaml
 
@@ -123,21 +125,31 @@ def evaluate(
         train_idx, val_idx, test_idx = split_indices(len(dataset), seed, val_frac, test_frac)
         subset = Subset(dataset, {"train": train_idx, "val": val_idx, "test": test_idx}[split])
 
-    checkpoint = checkpoint or default_checkpoint("outputs/checkpoints")
+    # Checkpoints are namespaced per experiment (set by train.py).
+    experiment = config.get("experiment", "default")
+    checkpoint = checkpoint or default_checkpoint(os.path.join("outputs/checkpoints", experiment))
     if checkpoint is None or not os.path.exists(checkpoint):
-        print("[error] No checkpoint found. Train a model first (python -m src.training.train).")
+        print(
+            f"[error] No checkpoint for experiment '{experiment}'. "
+            "Train this config first (python -m src.training.train --config ...)."
+        )
         return None
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    torch_device = (
+        torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if device == "auto"
+        else torch.device(device)
+    )
     model = STGCNBaseline(
         in_channels=config["model"]["in_channels"],
         num_classes=num_classes,
         num_persons=config["data"]["max_persons"],
         graph_strategy="spatial",
-    ).to(device)
-    state = torch.load(checkpoint, map_location=device)
+    ).to(torch_device)
+    state = torch.load(checkpoint, map_location=torch_device, weights_only=False)
     model.load_state_dict(state["model_state_dict"] if "model_state_dict" in state else state)
     model.eval()
+    device = torch_device
     print(f"Loaded checkpoint: {checkpoint}  (device={device})")
     print(f"Evaluating on '{split}' split: n={len(subset)}")
 
@@ -171,8 +183,9 @@ def main() -> None:
         choices=("test", "val", "train", "all"),
         help="which split to score",
     )
+    parser.add_argument("--device", default="auto", help='"auto", "cpu", or "cuda"')
     args = parser.parse_args()
-    evaluate(args.config, args.checkpoint, args.split)
+    evaluate(args.config, args.checkpoint, args.split, args.device)
 
 
 if __name__ == "__main__":
