@@ -5,6 +5,9 @@ experiment: phase4_unified
 data:
   num_frames: 64
   max_persons: 2
+  # Center+scale each skeleton per clip so the three datasets' different camera
+  # resolutions share one space — essential for cross-dataset transfer.
+  normalize: true
   datasets:
     - {name: ut_interaction, cache: outputs/ut_poses}
     - {name: bullying10k,    cache: outputs/b10k_poses}

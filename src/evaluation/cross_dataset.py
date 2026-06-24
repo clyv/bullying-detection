@@ -78,7 +78,8 @@ def pooled_evaluation(cfg, device):
 
     from src.datasets.unified_loader import MultiDatasetSkeletonDataset
 
-    ds = MultiDatasetSkeletonDataset(specs_from_config(cfg), cfg["data"]["num_frames"])
+    normalize = cfg["data"].get("normalize", False)
+    ds = MultiDatasetSkeletonDataset(specs_from_config(cfg), cfg["data"]["num_frames"], normalize)
     if len(ds) < 2:
         print("[warning] pooled dataset has <2 samples; skipping pooled evaluation.")
         return None
@@ -101,12 +102,13 @@ def leave_one_out(cfg, device):
 
     specs = specs_from_config(cfg)
     num_frames = cfg["data"]["num_frames"]
+    normalize = cfg["data"].get("normalize", False)
     results = {}
     print("\n=== Leave-one-dataset-out cross-dataset generalisation ===")
     for held in specs:
         train_specs = [s for s in specs if s != held]
-        train_ds = MultiDatasetSkeletonDataset(train_specs, num_frames)
-        test_ds = MultiDatasetSkeletonDataset([held], num_frames)
+        train_ds = MultiDatasetSkeletonDataset(train_specs, num_frames, normalize)
+        test_ds = MultiDatasetSkeletonDataset([held], num_frames, normalize)
         if len(train_ds) == 0 or len(test_ds) == 0:
             print(f"[skip] {held[0]}: empty train or test split")
             continue

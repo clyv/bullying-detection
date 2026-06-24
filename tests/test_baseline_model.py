@@ -1,9 +1,34 @@
 import numpy as np
 import torch
 
-from src.datasets.unified_loader import UnifiedSkeletonDataset, split_indices
+from src.datasets.unified_loader import (
+    UnifiedSkeletonDataset,
+    normalize_skeleton,
+    split_indices,
+)
 from src.models.graph import Graph
 from src.models.stgcn import STGCNBaseline
+
+
+def test_normalize_skeleton_is_resolution_invariant():
+    # Same pose at two camera scales should normalize to (almost) the same thing.
+    rng = np.random.default_rng(0)
+    base = rng.random((8, 2, 17, 2)).astype("float32")
+    scores = np.ones((8, 2, 17), dtype="float32")
+    small = normalize_skeleton(base * 50 + 10, scores)  # e.g. 346x260-ish
+    large = normalize_skeleton(base * 1000 + 500, scores)  # e.g. 1920x1080-ish
+    assert np.allclose(small, large, atol=1e-3)
+    # centered (visible-joint mean ~ 0) and scaled (std ~ 1)
+    assert abs(float(small.mean())) < 1e-4
+    assert abs(float(small.std()) - 1.0) < 1e-2
+
+
+def test_normalize_skeleton_keeps_missing_joints_zero():
+    kp = np.ones((4, 2, 17, 2), dtype="float32")
+    scores = np.ones((4, 2, 17), dtype="float32")
+    scores[:, :, 5] = 0  # joint 5 missing everywhere
+    out = normalize_skeleton(kp, scores)
+    assert (out[:, :, 5] == 0).all()
 
 
 def test_split_indices_disjoint_complete_and_deterministic():

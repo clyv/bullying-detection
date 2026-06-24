@@ -111,7 +111,9 @@ def evaluate(
     pose_cache = config["data"]["pose_cache"]
     num_classes = config["model"]["num_classes"]
 
-    dataset = UnifiedSkeletonDataset(pose_cache, target_frames=config["data"]["num_frames"])
+    dataset = UnifiedSkeletonDataset(
+        pose_cache, config["data"]["num_frames"], config["data"].get("normalize", False)
+    )
     if len(dataset) == 0:
         print(f"[warning] No .npz files in {pose_cache}; nothing to evaluate.")
         return None

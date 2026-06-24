@@ -17,12 +17,35 @@ CLASS_KEYWORDS = {
 }
 
 
-def features_to_tensor(kp, scores, target_frames):
+def normalize_skeleton(kp, scores):
+    """Center + scale a clip's keypoints into a camera-resolution-invariant space.
+
+    Using only visible joints (score > 0), subtract the per-axis mean and divide
+    by the overall std (a single scalar, so the x/y aspect and the geometry
+    between the two people are preserved). Missing joints stay at 0. This removes
+    the absolute pixel position/scale that otherwise lets the model shortcut on a
+    dataset's coordinate range instead of the motion itself.
+    """
+    mask = scores > 0  # (T, M, 17)
+    if not mask.any():
+        return kp
+    valid = kp[mask]  # (K, 2)
+    mean = valid.mean(axis=0)
+    std = float(valid.std()) + 1e-6
+    normed = (kp - mean) / std
+    return np.where(mask[..., None], normed, 0.0).astype(np.float32)
+
+
+def features_to_tensor(kp, scores, target_frames, normalize=False):
     """(T, M, 17, 2) keypoints + (T, M, 17) scores -> ST-GCN tensor (C=3, T, V, M).
 
     Temporally pads (edge) or truncates to ``target_frames`` and stacks the
-    per-joint confidence on as a third channel.
+    per-joint confidence on as a third channel. When ``normalize`` is set, the
+    skeleton is centered+scaled per clip (see normalize_skeleton) so different
+    camera resolutions land in a common space — needed for cross-dataset transfer.
     """
+    if normalize:
+        kp = normalize_skeleton(kp, scores)
     T = kp.shape[0]
     if T < target_frames:
         kp = np.pad(kp, ((0, target_frames - T), (0, 0), (0, 0), (0, 0)), mode="edge")
@@ -66,9 +89,10 @@ def label_from_filename(filename):
 class UnifiedSkeletonDataset(Dataset):
     """Loads unified .npz frame structures according to baseline.yaml parameters."""
 
-    def __init__(self, data_dir, target_frames=64):  # Updated to match your num_frames: 64
+    def __init__(self, data_dir, target_frames=64, normalize=False):
         self.data_dir = data_dir
         self.target_frames = target_frames
+        self.normalize = normalize
         if os.path.exists(data_dir):
             # Sorted for a reproducible order, so split_indices gives the same
             # train/val/test partition across runs and between train & evaluate.
@@ -92,7 +116,9 @@ class UnifiedSkeletonDataset(Dataset):
         else:
             label = label_from_filename(file_path)
 
-        tensor_data = features_to_tensor(data["keypoints"], data["scores"], self.target_frames)
+        tensor_data = features_to_tensor(
+            data["keypoints"], data["scores"], self.target_frames, self.normalize
+        )
         return tensor_data, torch.tensor(label, dtype=torch.long)
 
 
@@ -105,8 +131,9 @@ class MultiDatasetSkeletonDataset(Dataset):
     dataset, used for cross-dataset evaluation and per-dataset ablations.
     """
 
-    def __init__(self, specs, target_frames=64):
+    def __init__(self, specs, target_frames=64, normalize=False):
         self.target_frames = target_frames
+        self.normalize = normalize
         self.samples = []  # (path, dataset_name, binary_label)
         for name, cache in specs:
             if not os.path.isdir(cache):
@@ -127,5 +154,7 @@ class MultiDatasetSkeletonDataset(Dataset):
     def __getitem__(self, idx):
         path, _, label = self.samples[idx]
         with np.load(path) as data:
-            tensor_data = features_to_tensor(data["keypoints"], data["scores"], self.target_frames)
+            tensor_data = features_to_tensor(
+                data["keypoints"], data["scores"], self.target_frames, self.normalize
+            )
         return tensor_data, torch.tensor(label, dtype=torch.long)
