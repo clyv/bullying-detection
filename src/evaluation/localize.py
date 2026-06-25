@@ -74,15 +74,21 @@ def detection_matches(
     return matched
 
 
-def score_stream(model, keypoints, scores, device, window=64, stride=16, batch_size=32):
-    """Per-window aggression probability over a (T, M, 17, 2)/(T, M, 17) stream."""
+def score_stream(
+    model, keypoints, scores, device, window=64, stride=16, batch_size=32, normalize=False
+):
+    """Per-window aggression probability over a (T, M, 17, 2)/(T, M, 17) stream.
+
+    ``normalize`` must match how the checkpoint was trained (the unified model
+    uses skeleton normalization), otherwise the inputs are at the wrong scale.
+    """
     import torch
 
     from src.datasets.unified_loader import features_to_tensor
 
     starts = window_starts(len(keypoints), window, stride)
     tensors = [
-        features_to_tensor(keypoints[s : s + window], scores[s : s + window], window)
+        features_to_tensor(keypoints[s : s + window], scores[s : s + window], window, normalize)
         for s in starts
     ]
     probs: list[float] = []
@@ -96,10 +102,21 @@ def score_stream(model, keypoints, scores, device, window=64, stride=16, batch_s
 
 
 def localize_stream(
-    model, keypoints, scores, device, *, window=64, stride=16, threshold=0.5, max_gap=0
+    model,
+    keypoints,
+    scores,
+    device,
+    *,
+    window=64,
+    stride=16,
+    threshold=0.5,
+    max_gap=0,
+    normalize=False,
 ):
     """Return incident intervals (start_frame, end_frame, peak_score) for a stream."""
-    probs, starts = score_stream(model, keypoints, scores, device, window, stride)
+    probs, starts = score_stream(
+        model, keypoints, scores, device, window, stride, normalize=normalize
+    )
     return find_incidents(probs, starts, window, threshold, max_gap)
 
 
@@ -116,6 +133,7 @@ def run(stream_path, checkpoint, config_path="configs/unified.yaml", fps=30.0):
     stride = loc.get("stride", 16)
     threshold = loc.get("threshold", 0.5)
     max_gap = loc.get("max_gap", 0)
+    normalize = cfg["data"].get("normalize", False)  # must match training
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = STGCNBaseline(
@@ -124,7 +142,7 @@ def run(stream_path, checkpoint, config_path="configs/unified.yaml", fps=30.0):
         num_persons=cfg["data"]["max_persons"],
         graph_strategy="spatial",
     ).to(device)
-    state = torch.load(checkpoint, map_location=device)
+    state = torch.load(checkpoint, map_location=device, weights_only=False)
     model.load_state_dict(state["model_state_dict"] if "model_state_dict" in state else state)
 
     with np.load(stream_path) as data:
@@ -137,6 +155,7 @@ def run(stream_path, checkpoint, config_path="configs/unified.yaml", fps=30.0):
             stride=stride,
             threshold=threshold,
             max_gap=max_gap,
+            normalize=normalize,
         )
 
     print(f"{stream_path}: {len(incidents)} incident(s) flagged for review")

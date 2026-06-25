@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 
 import numpy as np
 
@@ -43,7 +44,7 @@ def evaluate_model(model, loader, device, num_classes=2):
     return accuracy(preds, targets), cm
 
 
-def _train_binary(train_ds, val_ds, cfg, device):
+def _train_binary(train_ds, val_ds, cfg, device, best_path=None):
     from torch.utils.data import DataLoader
 
     from src.models.stgcn import STGCNBaseline
@@ -64,6 +65,7 @@ def _train_binary(train_ds, val_ds, cfg, device):
         lr=cfg["training"]["lr"],
         weight_decay=cfg["training"]["weight_decay"],
         device=device,
+        best_path=best_path,
     )
     return model
 
@@ -85,12 +87,18 @@ def pooled_evaluation(cfg, device):
         return None
     val_size = max(1, int(len(ds) * 0.2))
     train_ds, val_ds = random_split(ds, [len(ds) - val_size, val_size])
-    model = _train_binary(train_ds, val_ds, cfg, device)
+    # Persist the pooled model so localize.py can run on new footage.
+    experiment = cfg.get("experiment", "phase4_unified")
+    ckpt_dir = os.path.join("outputs/checkpoints", experiment)
+    os.makedirs(ckpt_dir, exist_ok=True)
+    best_path = os.path.join(ckpt_dir, "stgcn_best.pt")
+    model = _train_binary(train_ds, val_ds, cfg, device, best_path=best_path)
     acc, cm = evaluate_model(
         model, DataLoader(val_ds, batch_size=cfg["training"]["batch_size"]), device
     )
     print("\n=== Pooled aggressive-vs-neutral evaluation ===")
     print(format_report(cm, acc, BINARY_NAMES))
+    print(f"[checkpoint] pooled model saved to {best_path}")
     return acc, cm
 
 
