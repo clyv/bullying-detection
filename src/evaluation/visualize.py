@@ -138,6 +138,68 @@ def crowd_pressure_scores(keypoints, scores):
     return pressure
 
 
+def moving_average(values, width):
+    """Box-filter smoothing; width clamped to >= 1."""
+    width = max(1, int(width))
+    return np.convolve(np.asarray(values, dtype=np.float64), np.ones(width) / width, mode="same")
+
+
+def motion_energy_scores(keypoints, scores, min_joints=3):
+    """Per-person height-normalized joint speed (heuristic activity signal).
+
+    Returns (frame_energy (T,), per_person (T, M)) where per_person[t, m] is the
+    mean joint displacement of person m between frames t-1 and t, divided by
+    their skeleton height (so small far-away people register like near ones).
+    frame_energy is the max over persons — "the most agitated person in frame".
+
+    This is NOT the trained classifier: frames flagged from this signal are
+    labelled HIGH ACTIVITY for review, never AGGRESSION.
+    """
+    T, n_persons = scores.shape[:2]
+    per_person = np.zeros((T, n_persons))
+    for t in range(1, T):
+        for m in range(n_persons):
+            vis = (scores[t, m] > 0) & (scores[t - 1, m] > 0)
+            if vis.sum() < min_joints:
+                continue
+            ys = keypoints[t, m][scores[t, m] > 0][:, 1]
+            height = max(float(ys.max() - ys.min()), 8.0)
+            disp = np.linalg.norm(keypoints[t, m][vis] - keypoints[t - 1, m][vis], axis=1)
+            per_person[t, m] = float(disp.mean()) / height
+    return per_person.max(axis=1), per_person
+
+
+def activity_pairs(keypoints, scores, per_person_motion, smooth_width):
+    """Per frame: (most agitated person, their nearest visible neighbour) or None."""
+    T, n_persons = scores.shape[:2]
+    smoothed = np.stack(
+        [moving_average(per_person_motion[:, m], smooth_width) for m in range(n_persons)], axis=1
+    )
+    result: list[tuple[int, int] | None] = [None] * T
+    for t in range(T):
+        order = np.argsort(smoothed[t])[::-1]
+        agitated = int(order[0])
+        if smoothed[t, agitated] <= 0:
+            continue
+        vis_a = scores[t, agitated] > 0
+        if not vis_a.any():
+            continue
+        ca = keypoints[t, agitated][vis_a].mean(axis=0)
+        best, best_d = None, None
+        for m in range(n_persons):
+            if m == agitated:
+                continue
+            vis = scores[t, m] > 0
+            if not vis.any():
+                continue
+            d = float(np.linalg.norm(keypoints[t, m][vis].mean(axis=0) - ca))
+            if best_d is None or d < best_d:
+                best, best_d = m, d
+        if best is not None:
+            result[t] = (min(agitated, best), max(agitated, best))
+    return result
+
+
 def pressure_spikes(pressure, baseline_frames):
     """Rise of crowd pressure above its recent baseline (sudden gatherings).
 
@@ -239,17 +301,23 @@ def draw_skeletons(frame, kp, sc, vis_thresh=0.1, color=None, thickness=2):
                 cv2.circle(frame, (int(joints[j, 0]), int(joints[j, 1])), thickness + 1, col, -1)
 
 
-def draw_status(frame, agg, threshold, idx, num_frames, frame_scores, manual=False):
-    """Overlay the flag banner, score, and a timeline bar (in place)."""
+def draw_status(frame, agg, threshold, idx, num_frames, frame_scores, manual=False, activity=False):
+    """Overlay the flag banner, score, and a timeline bar (in place).
+
+    Three flag types, honestly distinguished: model detections (AGGRESSION),
+    heuristic motion flags (HIGH ACTIVITY), operator marks (MANUAL MARK).
+    """
     import cv2
 
     h, w = frame.shape[:2]
     flagged = agg >= threshold
     if flagged:
-        border = (0, 165, 255) if manual else (0, 0, 255)
+        border = (0, 165, 255) if manual else (0, 80, 255) if activity else (0, 0, 255)
         cv2.rectangle(frame, (0, 0), (w - 1, h - 1), border, 8)
     if manual and flagged:
         banner, label = (0, 165, 255), f"MANUAL MARK p={agg:.2f}  [operator annotation]"
+    elif activity and flagged:
+        banner, label = (0, 80, 255), f"HIGH ACTIVITY p={agg:.2f}  [FLAGGED - for human review]"
     elif flagged:
         banner, label = (0, 0, 255), f"AGGRESSION p={agg:.2f}  [FLAGGED - for human review]"
     else:
@@ -283,6 +351,7 @@ def render_video(
     fps=None,
     highlight_pairs=None,
     manual_mask=None,
+    activity_mask=None,
 ):
     """Write an annotated copy of ``video_path``.
 
@@ -312,7 +381,10 @@ def render_video(
                     sel = list(pair)
                     draw_skeletons(frame, keypoints[i][sel], scores[i][sel], thickness=3)
             manual = bool(manual_mask[i]) if manual_mask is not None else False
-            draw_status(frame, float(frame_scores[i]), threshold, i, n, frame_scores, manual)
+            activity = bool(activity_mask[i]) if activity_mask is not None else False
+            draw_status(
+                frame, float(frame_scores[i]), threshold, i, n, frame_scores, manual, activity
+            )
         writer.write(frame)
         i += 1
     cap.release()
@@ -320,7 +392,7 @@ def render_video(
     return out_path
 
 
-def save_timeline(frame_scores, threshold, out_path, fps=30.0, pressure=None):
+def save_timeline(frame_scores, threshold, out_path, fps=30.0, activity=None):
     """Save a PNG of the per-frame aggression probability with incidents shaded."""
     import matplotlib
 
@@ -329,9 +401,11 @@ def save_timeline(frame_scores, threshold, out_path, fps=30.0, pressure=None):
 
     t = np.arange(len(frame_scores)) / fps
     fig, ax = plt.subplots(figsize=(12, 3))
-    ax.plot(t, frame_scores, color="#c0392b", lw=1.5, label="aggression probability")
-    if pressure is not None:
-        ax.plot(t, pressure, color="#2980b9", lw=1.0, ls=":", alpha=0.8, label="crowd pressure")
+    ax.plot(t, frame_scores, color="#c0392b", lw=1.5, label="combined score")
+    if activity is not None:
+        ax.plot(
+            t, activity, color="#e67e22", lw=1.0, ls=":", alpha=0.9, label="activity (heuristic)"
+        )
     ax.axhline(threshold, color="gray", ls="--", lw=1, label=f"threshold={threshold}")
     ax.fill_between(
         t, 0, 1, where=np.asarray(frame_scores) >= threshold, color="#c0392b", alpha=0.2
@@ -427,10 +501,17 @@ def run(
     state = torch.load(checkpoint, map_location=device, weights_only=False)
     model.load_state_dict(state["model_state_dict"] if "model_state_dict" in state else state)
 
+    motion_floor = crowd_cfg.get("motion_floor", 0.5)
+    motion_saturate = crowd_cfg.get("motion_saturate", 2.0)
+    motion_weight = crowd_cfg.get("motion_weight", 0.9)
+    smooth_seconds = crowd_cfg.get("smooth_seconds", 0.5)
+
     pressure = None
+    activity_curve = None
+    activity_mask = None
     highlight = None
     if n_persons > 2:
-        # Crowd mode: scan interacting pairs; a frame's score is its worst pair.
+        # Crowd mode: scan interacting pairs; a frame's model score is its worst pair.
         probs, starts, best_pairs = score_stream_pairs(
             model,
             keypoints,
@@ -441,13 +522,30 @@ def run(
             normalize=normalize,
             max_pairs=max_pairs,
         )
-        frame_scores = frame_scores_from_windows(probs, starts, window, num_frames)
-        highlight = frame_best_pairs(probs, starts, window, best_pairs, num_frames)
-        # Crowd-convergence signal catches gatherings the pose model can't see
-        # into (victim occluded under the crowd).
+        model_scores = frame_scores_from_windows(probs, starts, window, num_frames)
+        model_pairs = frame_best_pairs(probs, starts, window, best_pairs, num_frames)
+
+        # Heuristic activity signal: the most agitated person in frame, in
+        # height-normalized units, ramped between motion_floor and motion_saturate
+        # (calibrated on 30fps CCTV). Flags from this path say HIGH ACTIVITY.
+        smooth_w = int(smooth_seconds * src_fps)
+        frame_motion, per_person_motion = motion_energy_scores(keypoints, scores)
+        motion_smooth = moving_average(frame_motion, smooth_w)
+        span = max(motion_saturate - motion_floor, 1e-6)
+        activity_curve = np.clip((motion_smooth - motion_floor) / span, 0.0, 1.0) * motion_weight
+        # Crowd-convergence spikes also count as activity (ring forming around
+        # a victim the pose model can't see into).
         pressure = crowd_pressure_scores(keypoints, scores)
         spikes = pressure_spikes(pressure, int(baseline_seconds * src_fps))
-        frame_scores = np.maximum(frame_scores, np.clip(spikes * pressure_weight, 0.0, 0.99))
+        activity_curve = np.maximum(activity_curve, np.clip(spikes * pressure_weight, 0.0, 0.99))
+
+        activity_mask = activity_curve > model_scores
+        frame_scores = np.maximum(model_scores, activity_curve)
+        motion_hl = activity_pairs(keypoints, scores, per_person_motion, smooth_w)
+        highlight = [
+            motion_hl[f] if activity_mask[f] and motion_hl[f] is not None else model_pairs[f]
+            for f in range(num_frames)
+        ]
     else:
         probs, starts = score_stream(
             model, keypoints, scores, device, window, stride, normalize=normalize
@@ -485,7 +583,11 @@ def run(
     os.makedirs(output_dir, exist_ok=True)
     stem = output_stem(video, run_name, unique)
     timeline = save_timeline(
-        frame_scores, threshold, os.path.join(output_dir, f"{stem}_timeline.png"), src_fps, pressure
+        frame_scores,
+        threshold,
+        os.path.join(output_dir, f"{stem}_timeline.png"),
+        src_fps,
+        activity=activity_curve,
     )
     annotated = render_video(
         video,
@@ -497,6 +599,7 @@ def run(
         fps,
         highlight_pairs=highlight,
         manual_mask=manual_mask,
+        activity_mask=activity_mask,
     )
 
     forced_spans = {(s, e) for s, e, _ in forced}

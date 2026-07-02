@@ -96,3 +96,32 @@ def test_add_forced_incidents_boosts_scores_above_threshold():
 
     assert incidents == [(2, 5, 0.61)]
     assert boosted[3] > 0.6
+
+
+def test_motion_energy_moving_person_scores_higher():
+    from src.evaluation.visualize import motion_energy_scores
+
+    T, M = 10, 2
+    kp = np.zeros((T, M, 17, 2), dtype="float32")
+    sc = np.ones((T, M, 17), dtype="float32")
+    kp[:, :, :, 1] = np.linspace(0, 50, 17)  # 50px tall skeletons
+    kp[:, 1, :, 0] = np.arange(T)[:, None] * 5.0  # person 1 moves 5px/frame
+
+    frame_e, per_person = motion_energy_scores(kp, sc)
+    assert per_person[5, 1] > per_person[5, 0]  # mover beats the statue
+    assert np.isclose(frame_e[5], per_person[5, 1])  # frame takes the max
+
+
+def test_motion_energy_is_height_normalized():
+    from src.evaluation.visualize import motion_energy_scores
+
+    T = 6
+    kp_small = np.zeros((T, 1, 17, 2), dtype="float32")
+    kp_small[:, 0, :, 1] = np.linspace(0, 50, 17)
+    kp_small[:, 0, :, 0] = np.arange(T)[:, None] * 5.0  # 5px/frame at 50px tall
+    kp_big = kp_small * 4.0  # same relative motion at 200px tall
+    sc = np.ones((T, 1, 17), dtype="float32")
+
+    _, small = motion_energy_scores(kp_small, sc)
+    _, big = motion_energy_scores(kp_big, sc)
+    assert np.allclose(small[1:], big[1:], atol=1e-5)
