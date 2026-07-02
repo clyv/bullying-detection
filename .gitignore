@@ -10,6 +10,11 @@ weights/
 # dataset archives (e.g. ut_interaction.zip) — far too large for git
 *.zip
 
+# local test footage — real school CCTV of identifiable minors; NEVER commit
+test-data/
+*.mp4
+*.avi
+
 # Local agent instructions — intentionally kept out of the repo
 CLAUDE.md
 CLAUDE.local.md

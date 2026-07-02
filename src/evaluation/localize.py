@@ -101,6 +101,77 @@ def score_stream(
     return np.array(probs), starts
 
 
+def candidate_pairs(kp_w, sc_w, max_pairs=16, distance_scale=2.5, min_visibility=0.3):
+    """Interacting-person pairs within one window of a crowd scene.
+
+    The classifier was trained on two-person interactions, so a crowded frame is
+    scanned as a set of pairs: every sufficiently visible person is paired with
+    their nearest neighbour, kept only if the two are within ``distance_scale``
+    body-heights of each other (people across the room aren't interacting).
+    Returns up to ``max_pairs`` (i, j) slot pairs, closest first.
+    """
+    n_persons = sc_w.shape[1]
+    present, cents, sizes = [], {}, {}
+    for m in range(n_persons):
+        vis = sc_w[:, m] > 0  # (T, 17)
+        if vis.any(axis=1).mean() < min_visibility:
+            continue
+        pts = kp_w[:, m][vis]
+        if len(pts) == 0:
+            continue
+        present.append(m)
+        cents[m] = pts.mean(axis=0)
+        sizes[m] = max(float(pts[:, 1].max() - pts[:, 1].min()), 1.0)
+    if len(present) < 2:
+        return []
+
+    scale = float(np.median([sizes[m] for m in present]))
+    pairs: dict[tuple[int, int], float] = {}
+    for m in present:
+        dists = [(float(np.linalg.norm(cents[m] - cents[n])), n) for n in present if n != m]
+        d, nearest = min(dists)
+        if d <= distance_scale * scale:
+            key = (min(m, nearest), max(m, nearest))
+            pairs[key] = min(pairs.get(key, d), d)
+    return sorted(pairs, key=pairs.get)[:max_pairs]
+
+
+def score_stream_pairs(
+    model, keypoints, scores, device, window=64, stride=16, normalize=False, max_pairs=16
+):
+    """Crowd-aware scoring: per window, the max aggression over interacting pairs.
+
+    Returns (probs, starts, best_pairs) where best_pairs[k] is the (i, j) slot
+    pair responsible for window k's score (None if nobody was interacting).
+    """
+    import torch
+
+    from src.datasets.unified_loader import features_to_tensor
+
+    starts = window_starts(len(keypoints), window, stride)
+    probs: list[float] = []
+    best_pairs: list[tuple[int, int] | None] = []
+    model.eval()
+    with torch.no_grad():
+        for s in starts:
+            kp_w, sc_w = keypoints[s : s + window], scores[s : s + window]
+            pairs = candidate_pairs(kp_w, sc_w, max_pairs=max_pairs)
+            if not pairs:
+                probs.append(0.0)
+                best_pairs.append(None)
+                continue
+            tensors = [
+                features_to_tensor(kp_w[:, [i, j]], sc_w[:, [i, j]], window, normalize)
+                for i, j in pairs
+            ]
+            batch = torch.stack(tensors).to(device)
+            p = torch.softmax(model(batch), dim=1)[:, AGGRESSIVE].cpu().numpy()
+            k = int(p.argmax())
+            probs.append(float(p[k]))
+            best_pairs.append(pairs[k])
+    return np.array(probs), starts, best_pairs
+
+
 def localize_stream(
     model,
     keypoints,
@@ -112,11 +183,25 @@ def localize_stream(
     threshold=0.5,
     max_gap=0,
     normalize=False,
+    crowd_aware=False,
+    max_pairs=16,
 ):
     """Return incident intervals (start_frame, end_frame, peak_score) for a stream."""
-    probs, starts = score_stream(
-        model, keypoints, scores, device, window, stride, normalize=normalize
-    )
+    if crowd_aware:
+        probs, starts, _ = score_stream_pairs(
+            model,
+            keypoints,
+            scores,
+            device,
+            window,
+            stride,
+            normalize=normalize,
+            max_pairs=max_pairs,
+        )
+    else:
+        probs, starts = score_stream(
+            model, keypoints, scores, device, window, stride, normalize=normalize
+        )
     return find_incidents(probs, starts, window, threshold, max_gap)
 
 
@@ -133,6 +218,8 @@ def run(stream_path, checkpoint, config_path="configs/unified.yaml", fps=30.0):
     stride = loc.get("stride", 16)
     threshold = loc.get("threshold", 0.5)
     max_gap = loc.get("max_gap", 0)
+    crowd_aware = loc.get("crowd_aware", True)
+    max_pairs = loc.get("max_pairs", 24)
     normalize = cfg["data"].get("normalize", False)  # must match training
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -156,6 +243,8 @@ def run(stream_path, checkpoint, config_path="configs/unified.yaml", fps=30.0):
             threshold=threshold,
             max_gap=max_gap,
             normalize=normalize,
+            crowd_aware=crowd_aware,
+            max_pairs=max_pairs,
         )
 
     print(f"{stream_path}: {len(incidents)} incident(s) flagged for review")
