@@ -521,6 +521,7 @@ def run(
             stride,
             normalize=normalize,
             max_pairs=max_pairs,
+            min_pair_height=crowd_cfg.get("min_pair_height", 120),
         )
         model_scores = frame_scores_from_windows(probs, starts, window, num_frames)
         model_pairs = frame_best_pairs(probs, starts, window, best_pairs, num_frames)

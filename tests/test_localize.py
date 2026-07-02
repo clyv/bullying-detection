@@ -127,6 +127,34 @@ def test_score_stream_pairs_end_to_end():
     assert all(bp is None or (len(bp) == 2 and bp[0] < bp[1]) for bp in best_pairs)
 
 
+def test_score_stream_pairs_quality_gate_mutes_small_skeletons():
+    import torch
+
+    from src.evaluation.localize import score_stream_pairs
+    from src.models.stgcn import STGCNBaseline
+
+    rng = np.random.default_rng(0)
+    T, M = 70, 3
+    kp = np.zeros((T, M, 17, 2), dtype="float32")
+    sc = np.ones((T, M, 17), dtype="float32")
+    kp[:, :, :, 1] = np.linspace(0, 60, 17)  # 60px tall — below a 120px gate
+    kp[:, 0, :, 0] += 100
+    kp[:, 1, :, 0] += 140
+    kp += rng.standard_normal(kp.shape).astype("float32")
+
+    model = STGCNBaseline(in_channels=3, num_classes=2, num_persons=2)
+    probs, _, best = score_stream_pairs(
+        model, kp, sc, torch.device("cpu"), window=64, stride=32, min_pair_height=120
+    )
+    assert all(p == 0.0 for p in probs)  # model abstains on tiny skeletons
+    assert all(bp is None for bp in best)
+
+    probs2, _, best2 = score_stream_pairs(
+        model, kp, sc, torch.device("cpu"), window=64, stride=32, min_pair_height=0
+    )
+    assert any(bp is not None for bp in best2)  # gate off -> pairs are scored
+
+
 def test_localize_stream_end_to_end():
     import torch
 

@@ -41,6 +41,11 @@ localization:
 crowd:
   max_persons: 16      # people tracked during pose extraction
   max_pairs: 16        # interacting pairs scored per window
+  # Pose-quality gate: the classifier only votes on pairs whose skeletons are
+  # at least this tall (px). On tiny far-away people its output is jitter noise
+  # (measured: ~80px CCTV crowd vs ~174px UT training-like footage), so below
+  # the gate the model abstains and the activity heuristics carry the frame.
+  min_pair_height: 120
   pressure_weight: 1.5 # scale on crowd-convergence spikes blended into activity
   baseline_seconds: 10 # trailing window defining "normal" crowd density
   # Heuristic HIGH ACTIVITY signal (labelled distinctly from model AGGRESSION):

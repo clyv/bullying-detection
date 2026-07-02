@@ -136,13 +136,43 @@ def candidate_pairs(kp_w, sc_w, max_pairs=16, distance_scale=2.5, min_visibility
     return sorted(pairs, key=pairs.get)[:max_pairs]
 
 
+def _pair_heights_ok(kp_w, sc_w, pair, min_height):
+    """Both people in the pair must have a median visible-skeleton height >= min_height."""
+    if min_height <= 0:
+        return True
+    for m in pair:
+        heights = []
+        for t in range(len(kp_w)):
+            vis = sc_w[t, m] > 0
+            if vis.sum() >= 5:
+                pts = kp_w[t, m][vis]
+                heights.append(float(pts[:, 1].max() - pts[:, 1].min()))
+        if not heights or float(np.median(heights)) < min_height:
+            return False
+    return True
+
+
 def score_stream_pairs(
-    model, keypoints, scores, device, window=64, stride=16, normalize=False, max_pairs=16
+    model,
+    keypoints,
+    scores,
+    device,
+    window=64,
+    stride=16,
+    normalize=False,
+    max_pairs=16,
+    min_pair_height=0,
 ):
     """Crowd-aware scoring: per window, the max aggression over interacting pairs.
 
     Returns (probs, starts, best_pairs) where best_pairs[k] is the (i, j) slot
     pair responsible for window k's score (None if nobody was interacting).
+
+    ``min_pair_height`` is a pose-quality gate: the classifier was trained on
+    large, cleanly-tracked skeletons, and on tiny far-away people its output is
+    jitter-dominated noise. Pairs whose skeletons are shorter than this many
+    pixels are not scored — the model abstains (prob 0) and the caller's
+    activity heuristics carry the frame instead.
     """
     import torch
 
@@ -156,6 +186,7 @@ def score_stream_pairs(
         for s in starts:
             kp_w, sc_w = keypoints[s : s + window], scores[s : s + window]
             pairs = candidate_pairs(kp_w, sc_w, max_pairs=max_pairs)
+            pairs = [p for p in pairs if _pair_heights_ok(kp_w, sc_w, p, min_pair_height)]
             if not pairs:
                 probs.append(0.0)
                 best_pairs.append(None)
