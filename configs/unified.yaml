@@ -31,7 +31,9 @@ model:
   adaptive: true
 
 training:
-  batch_size: 16
+  # 64 roughly halves wall-clock vs 16 on an 8GB laptop GPU (~2.9GB peak for agcn
+  # at 64 frames). Raise to 128 (~5.8GB) if you have the headroom.
+  batch_size: 64
   epochs: 40
   lr: 0.01
   weight_decay: 0.0001

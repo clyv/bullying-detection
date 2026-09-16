@@ -132,7 +132,7 @@ def test_adaptive_term_starts_inert():
     # the first few hundred steps.
     A = torch.rand(3, 17, 17)
     layer = AdaptiveGraphConv(3, 16, A)
-    assert float(layer.alpha.abs().sum()) == 0.0
+    assert float(layer.alpha.detach().abs().sum()) == 0.0
     layer.eval()
     x = torch.randn(2, 3, 8, 17)
     with torch.no_grad():
