@@ -16,13 +16,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 
 import numpy as np
 
 from src.datasets.taxonomy import BINARY_NAMES
 from src.evaluation.evaluate import accuracy, confusion_matrix, format_report
-
 
 def predict(model, loader, device):
     """Return (preds, targets) numpy arrays over a loader."""
@@ -37,12 +37,10 @@ def predict(model, loader, device):
             targets.extend(labels.numpy().tolist())
     return np.array(preds), np.array(targets)
 
-
 def evaluate_model(model, loader, device, num_classes=2):
     preds, targets = predict(model, loader, device)
     cm = confusion_matrix(preds, targets, num_classes)
     return accuracy(preds, targets), cm
-
 
 def _train_binary(train_ds, val_ds, cfg, device, best_path=None):
     from torch.utils.data import DataLoader
@@ -69,10 +67,8 @@ def _train_binary(train_ds, val_ds, cfg, device, best_path=None):
     )
     return model
 
-
 def specs_from_config(cfg):
     return [(d["name"], d["cache"]) for d in cfg["data"]["datasets"]]
-
 
 def pooled_evaluation(cfg, device):
     """Train on a pooled 80% split, evaluate the binary confusion on the held-out 20%."""
@@ -104,12 +100,10 @@ def pooled_evaluation(cfg, device):
     print(f"[checkpoint] pooled model saved to {best_path}")
     return acc, cm
 
-
-def leave_one_out(cfg, device):
-    """Per-dataset ablation: train on every dataset except one, test on the held-out one."""
+def leave_one_out(cfg, device, resume_index=0, ckpt_path=None):
     from torch.utils.data import DataLoader
-
     from src.datasets.unified_loader import MultiDatasetSkeletonDataset
+    import json
 
     specs = specs_from_config(cfg)
     num_frames = cfg["data"]["num_frames"]
@@ -117,42 +111,79 @@ def leave_one_out(cfg, device):
     max_persons = cfg["data"]["max_persons"]
     results = {}
     print("\n=== Leave-one-dataset-out cross-dataset generalisation ===")
-    for held in specs:
+
+    for idx, held in enumerate(specs):
+
+        # Resume support: skip completed datasets
+        if idx < resume_index:
+            print(f"[resume] skipping {held[0]} (already completed)")
+            continue
+
         train_specs = [s for s in specs if s != held]
         train_ds = MultiDatasetSkeletonDataset(train_specs, num_frames, normalize, max_persons)
         test_ds = MultiDatasetSkeletonDataset([held], num_frames, normalize, max_persons)
+
         if len(train_ds) == 0 or len(test_ds) == 0:
             print(f"[skip] {held[0]}: empty train or test split")
             continue
+
         model = _train_binary(train_ds, train_ds, cfg, device)
         acc, cm = evaluate_model(
             model, DataLoader(test_ds, batch_size=cfg["training"]["batch_size"]), device
         )
+
         results[held[0]] = (acc, cm)
         print(f"\n-- tested on held-out: {held[0]} (n={len(test_ds)}) --")
         print(format_report(cm, acc, BINARY_NAMES))
+
+        # Save progress for resume
+        if ckpt_path is not None:
+            with open(ckpt_path, "w") as f:
+                json.dump({"last_index": idx + 1}, f)
+
     return results
 
-
-def run(config_path="configs/unified.yaml"):
+def run(config_path="configs/unified.yaml", resume=False):
     import torch
     import yaml
+    import json
+    import os
 
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using execution device: {device}")
-    pooled_evaluation(cfg, device)
-    leave_one_out(cfg, device)
 
+    # Set up checkpoint path
+    experiment = cfg.get("experiment", "phase4_unified")
+    ckpt_dir = os.path.join("outputs/checkpoints", experiment)
+    os.makedirs(ckpt_dir, exist_ok=True)
+    ckpt_path = os.path.join(ckpt_dir, "progress.json")
+
+    # Load resume index if requested
+    if resume and os.path.exists(ckpt_path):
+        with open(ckpt_path, "r") as f:
+            ckpt = json.load(f)
+        resume_index = ckpt.get("last_index", 0)
+        print(f"[resume] starting from dataset index {resume_index}")
+    else:
+        resume_index = 0
+
+    # Run pooled eval (no resume needed here)
+    pooled_evaluation(cfg, device)
+
+    # Pass resume_index and ckpt_path into leave_one_out
+    leave_one_out(cfg, device, resume_index, ckpt_path)
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--config", default="configs/unified.yaml")
-    run(parser.parse_args().config)
-
+    parser.add_argument("--resume", action="store_true")
+    args = parser.parse_args()
+    run(args.config, resume=args.resume)
 
 if __name__ == "__main__":
     main()
