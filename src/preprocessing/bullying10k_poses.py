@@ -125,7 +125,7 @@ def convert_file(src: Path, out_dir: Path, max_persons: int = 2) -> Path:
     label = label_for(str(src))
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{src.stem}.npz"
-    fields = dict(keypoints=keypoints, scores=scores, source=str(src))
+    fields = {"keypoints": keypoints, "scores": scores, "source": str(src)}
     if label is not None:
         fields["label"] = label
         fields["label_name"] = BULLYING10K_CLASSES[label]
@@ -203,7 +203,7 @@ def convert_keypoints_json(json_path: Path, out_dir: Path, max_persons: int = 2,
         keypoints, scores = coco_to_unified(seq, max_persons)
         label = label_for(clip)
         out_path = out_dir / (clip.replace("/", "__") + ".npz")
-        fields = dict(keypoints=keypoints, scores=scores, source=clip)
+        fields = {"keypoints": keypoints, "scores": scores, "source": clip}
         if label is not None:
             fields["label"] = label
             fields["label_name"] = BULLYING10K_CLASSES[label]

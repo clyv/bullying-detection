@@ -261,7 +261,7 @@ def run(stream_path, checkpoint, config_path="configs/unified.yaml", fps=30.0):
         graph_strategy="spatial",
     ).to(device)
     state = torch.load(checkpoint, map_location=device, weights_only=False)
-    model.load_state_dict(state["model_state_dict"] if "model_state_dict" in state else state)
+    model.load_state_dict(state.get("model_state_dict", state))
 
     with np.load(stream_path) as data:
         incidents = localize_stream(

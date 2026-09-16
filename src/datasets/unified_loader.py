@@ -1,9 +1,12 @@
+import copy
 import os
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from src.datasets.augment import apply_geometric, apply_structural
+from src.datasets.streams import build_stream
 from src.datasets.taxonomy import binary_label
 
 # UT-Interaction class order (Phase 1 baseline, num_classes: 6 in baseline.yaml).
@@ -57,7 +60,16 @@ def coerce_persons(kp, scores, max_persons):
     return pad_kp, pad_sc
 
 
-def features_to_tensor(kp, scores, target_frames, normalize=False, max_persons=None):
+def features_to_tensor(
+    kp,
+    scores,
+    target_frames,
+    normalize=False,
+    max_persons=None,
+    augment=None,
+    stream="joint",
+    rng=None,
+):
     """(T, M, 17, 2) keypoints + (T, M, 17) scores -> ST-GCN tensor (C=3, T, V, M).
 
     Temporally pads (edge) or truncates to ``target_frames`` and stacks the
@@ -65,10 +77,20 @@ def features_to_tensor(kp, scores, target_frames, normalize=False, max_persons=N
     skeleton is centered+scaled per clip (see normalize_skeleton) so different
     camera resolutions land in a common space. ``max_persons`` coerces the person
     axis to a fixed size so caches with different M can be batched together.
+
+    ``augment`` (an AugmentConfig, training splits only) runs structural transforms
+    before normalization — they change the visible-joint statistics normalization
+    is computed from — and geometric ones after, where they survive it. ``stream``
+    selects joint / bone / joint_motion / bone_motion (see datasets/streams.py).
     """
     kp, scores = coerce_persons(kp, scores, max_persons)
+    if augment is not None:
+        rng = rng if rng is not None else np.random.default_rng()
+        kp, scores = apply_structural(kp, scores, rng, augment)
     if normalize:
         kp = normalize_skeleton(kp, scores)
+    if augment is not None:
+        kp = apply_geometric(kp, rng, augment)
     T = kp.shape[0]
     if T < target_frames:
         kp = np.pad(kp, ((0, target_frames - T), (0, 0), (0, 0), (0, 0)), mode="edge")
@@ -77,7 +99,8 @@ def features_to_tensor(kp, scores, target_frames, normalize=False, max_persons=N
         kp = kp[:target_frames]
         scores = scores[:target_frames]
     features = np.concatenate([kp, np.expand_dims(scores, axis=-1)], axis=-1)
-    return torch.tensor(features, dtype=torch.float32).permute(3, 0, 2, 1)
+    tensor = torch.tensor(features, dtype=torch.float32).permute(3, 0, 2, 1)
+    return build_stream(tensor, stream)
 
 
 def split_indices(n, seed=42, val_frac=0.15, test_frac=0.15):
@@ -109,14 +132,58 @@ def label_from_filename(filename):
         return 0
 
 
-class UnifiedSkeletonDataset(Dataset):
+class _StreamingDataset(Dataset):
+    """Shared augmentation/stream plumbing for the two pose-cache datasets."""
+
+    augment_seed = None
+
+    def with_augment(self, augment, seed=None):
+        """Shallow clone that augments, sharing this instance's scanned file list.
+
+        Train and val are ``Subset``s over the *same* index space, so they must come
+        from datasets that enumerate samples identically — and re-scanning 29k .npz
+        files just to turn augmentation on would be wasteful. Cloning keeps one scan
+        and lets only the training subset be augmented.
+
+        ``seed`` makes the transform deterministic per sample index, which training
+        does not want (every epoch should differ) but the robustness sweep requires.
+        """
+        clone = copy.copy(self)
+        clone.augment = augment
+        clone.augment_seed = seed
+        return clone
+
+    def with_stream(self, stream):
+        """Shallow clone reading a different input stream (joint / bone / motion)."""
+        clone = copy.copy(self)
+        clone.stream = stream
+        return clone
+
+    def _rng(self, idx):
+        """Per-sample generator; seeded only when reproducibility was asked for."""
+        if self.augment_seed is None:
+            return None
+        return np.random.default_rng(self.augment_seed + idx)
+
+
+class UnifiedSkeletonDataset(_StreamingDataset):
     """Loads unified .npz frame structures according to baseline.yaml parameters."""
 
-    def __init__(self, data_dir, target_frames=64, normalize=False, max_persons=None):
+    def __init__(
+        self,
+        data_dir,
+        target_frames=64,
+        normalize=False,
+        max_persons=None,
+        augment=None,
+        stream="joint",
+    ):
         self.data_dir = data_dir
         self.target_frames = target_frames
         self.normalize = normalize
         self.max_persons = max_persons
+        self.augment = augment
+        self.stream = stream
         if os.path.exists(data_dir):
             # Sorted for a reproducible order, so split_indices gives the same
             # train/val/test partition across runs and between train & evaluate.
@@ -128,6 +195,22 @@ class UnifiedSkeletonDataset(Dataset):
 
     def __len__(self):
         return len(self.file_list)
+
+    def labels(self):
+        """Every clip's label, read without decoding keypoints (cached after first call).
+
+        Used for class-balanced loss weighting, which needs the label distribution of
+        the training split before training starts.
+        """
+        if getattr(self, "_labels", None) is None:
+            found = []
+            for path in self.file_list:
+                with np.load(path) as data:
+                    found.append(
+                        int(data["label"]) if "label" in data else label_from_filename(path)
+                    )
+            self._labels = found
+        return self._labels
 
     def __getitem__(self, idx):
         file_path = self.file_list[idx]
@@ -141,12 +224,19 @@ class UnifiedSkeletonDataset(Dataset):
             label = label_from_filename(file_path)
 
         tensor_data = features_to_tensor(
-            data["keypoints"], data["scores"], self.target_frames, self.normalize, self.max_persons
+            data["keypoints"],
+            data["scores"],
+            self.target_frames,
+            self.normalize,
+            self.max_persons,
+            self.augment,
+            self.stream,
+            self._rng(idx),
         )
         return tensor_data, torch.tensor(label, dtype=torch.long)
 
 
-class MultiDatasetSkeletonDataset(Dataset):
+class MultiDatasetSkeletonDataset(_StreamingDataset):
     """Pools several pose caches under the binary aggressive/neutral label space.
 
     ``specs`` is a list of (dataset_name, cache_dir) pairs. Each sample's native
@@ -155,10 +245,20 @@ class MultiDatasetSkeletonDataset(Dataset):
     dataset, used for cross-dataset evaluation and per-dataset ablations.
     """
 
-    def __init__(self, specs, target_frames=64, normalize=False, max_persons=None):
+    def __init__(
+        self,
+        specs,
+        target_frames=64,
+        normalize=False,
+        max_persons=None,
+        augment=None,
+        stream="joint",
+    ):
         self.target_frames = target_frames
         self.normalize = normalize
         self.max_persons = max_persons
+        self.augment = augment
+        self.stream = stream
         self.samples = []  # (path, dataset_name, binary_label)
         for name, cache in specs:
             if not os.path.isdir(cache):
@@ -185,5 +285,8 @@ class MultiDatasetSkeletonDataset(Dataset):
                 self.target_frames,
                 self.normalize,
                 self.max_persons,
+                self.augment,
+                self.stream,
+                self._rng(idx),
             )
         return tensor_data, torch.tensor(label, dtype=torch.long)

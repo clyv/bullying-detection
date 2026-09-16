@@ -7,17 +7,23 @@ data:
   pose_cache: outputs/ut_poses   # .npz files from src/preprocessing/pose_extraction.py
   num_frames: 64                 # temporal window fed to the model
   max_persons: 2
+  val_frac: 0.15
+  test_frac: 0.15
+  normalize: true                # camera-resolution-invariant skeletons
 
 pose:
   model: yolov8m-pose.pt
   conf_threshold: 0.25
 
 model:
-  name: stgcn
+  # 'agcn' = learnable topology + multi-scale TCN; 'stgcn' reproduces the original
+  # Phase 1 baseline numbers.
+  name: agcn
   num_classes: 6                 # UT-Interaction
   class_names: [handshake, hug, kick, point, punch, push]
   graph: coco17
   in_channels: 3                 # (x, y) coordinates + per-joint confidence score
+  dropout: 0.3
 
 training:
   batch_size: 16
@@ -27,3 +33,19 @@ training:
   scheduler: cosine
   device: cuda                   # RTX 5060 → requires the cu128 torch build
   seed: 42
+  focal_gamma: 2.0
+  label_smoothing: 0.05
+  class_balanced: true
+  warmup_epochs: 3
+  clip_grad: 1.0
+
+augment:
+  joint_dropout: 0.1
+  person_dropout: 0.05
+  coord_noise: 0.02
+  flip_prob: 0.5
+  person_swap_prob: 0.5
+  temporal_crop: 0.2
+  scale_jitter: 0.2
+  rotate_degrees: 15.0
+  shear: 0.1

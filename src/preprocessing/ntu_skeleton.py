@@ -152,13 +152,13 @@ def convert_file(src: Path, out_dir: Path, mode: str) -> Path:
     action = parse_name(src.stem)["action"]
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{src.stem}.npz"
-    fields = dict(
-        keypoints=keypoints,
-        scores=scores,
-        action=action,
-        source=str(src),
-        frame_size=(1920, 1080),
-    )
+    fields = {
+        "keypoints": keypoints,
+        "scores": scores,
+        "action": action,
+        "source": str(src),
+        "frame_size": (1920, 1080),
+    }
     # Relevant-subset actions get a unified 0-indexed label the loader can train
     # on directly; out-of-subset ("all" mode) clips carry only the raw action id.
     if action in ACTION_TO_LABEL:

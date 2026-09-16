@@ -5,6 +5,8 @@ experiment: phase4_unified
 data:
   num_frames: 64
   max_persons: 2
+  val_frac: 0.15
+  test_frac: 0.15
   # Center+scale each skeleton per clip so the three datasets' different camera
   # resolutions share one space — essential for cross-dataset transfer.
   normalize: true
@@ -17,11 +19,16 @@ data:
     - {name: fight_surv,     cache: outputs/fightsurv_poses}  # 300 real surveillance clips
 
 model:
-  name: stgcn
+  # 'agcn' = learnable graph topology + multi-scale temporal conv (src/models/agcn.py).
+  # Set to 'stgcn' to reproduce the Phase 1-4 baseline numbers.
+  name: agcn
   num_classes: 2
   class_names: [neutral, aggressive]
   graph: coco17
   in_channels: 3
+  dropout: 0.3
+  base_channels: 64
+  adaptive: true
 
 training:
   batch_size: 16
@@ -30,6 +37,29 @@ training:
   weight_decay: 0.0001
   device: cuda
   seed: 42
+  # Focal loss instead of cross-entropy: CE is what drove P(aggressive)=1.000 on
+  # real footage. gamma=0 falls back to plain CE for the ablation.
+  focal_gamma: 2.0
+  label_smoothing: 0.05
+  class_balanced: true   # inverse-frequency weights; the pooled corpus is skewed
+  warmup_epochs: 3       # the adaptive adjacency is unstable at full LR from step 0
+  clip_grad: 1.0
+  mixup_alpha: 0.0       # >0 enables skeleton mixup (disables focal loss that epoch)
+
+# Training-split-only augmentation. Chosen against measured failure modes rather
+# than generically: joint_dropout simulates the missing keypoints YOLO-Pose returns
+# at range, temporal_crop breaks each corpus's action-trimming convention, and
+# scale_jitter stops the model assuming normalization was perfect.
+augment:
+  joint_dropout: 0.1
+  person_dropout: 0.05
+  coord_noise: 0.02
+  flip_prob: 0.5
+  person_swap_prob: 0.5
+  temporal_crop: 0.2
+  scale_jitter: 0.2
+  rotate_degrees: 15.0
+  shear: 0.1
 
 # Phase 5 — sliding-window temporal localization on a continuous stream.
 localization:
@@ -43,7 +73,6 @@ localization:
 # pose model can't see into (victim occluded under the crowd).
 crowd:
   max_persons: 16      # people tracked during pose extraction
-  max_pairs: 16        # interacting pairs scored per window
   # Pose-quality gate: the classifier only votes on pairs whose skeletons are
   # at least this tall (px). On tiny far-away people its output is jitter noise
   # (measured: ~80px CCTV crowd vs ~174px UT training-like footage), so below

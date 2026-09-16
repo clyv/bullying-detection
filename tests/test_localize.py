@@ -149,7 +149,7 @@ def test_score_stream_pairs_quality_gate_mutes_small_skeletons():
     assert all(p == 0.0 for p in probs)  # model abstains on tiny skeletons
     assert all(bp is None for bp in best)
 
-    probs2, _, best2 = score_stream_pairs(
+    _probs2, _, best2 = score_stream_pairs(
         model, kp, sc, torch.device("cpu"), window=64, stride=32, min_pair_height=0
     )
     assert any(bp is not None for bp in best2)  # gate off -> pairs are scored

@@ -94,24 +94,69 @@ Every route converges on the same `.npz` format: `keypoints (T, M, 17, 2)`
 COCO-order pixel coordinates plus `scores (T, M, 17)` confidences (dataset
 converters also write an integer `label`).
 
-Train and evaluate the ST-GCN baseline on a single dataset, configured through a
-YAML file ([configs/baseline.yaml](configs/baseline.yaml) for UT-Interaction,
+Train and evaluate on a single dataset, configured through a YAML file
+([configs/baseline.yaml](configs/baseline.yaml) for UT-Interaction,
 [configs/bullying10k.yaml](configs/bullying10k.yaml) for Bullying10K,
 [configs/ntu.yaml](configs/ntu.yaml) for NTU):
 
 ```
 python -m src.training.train      --config configs/bullying10k.yaml   # checkpoints to outputs/checkpoints/
-python -m src.evaluation.evaluate --config configs/bullying10k.yaml   # accuracy + per-class confusion matrix
+python -m src.evaluation.evaluate --config configs/bullying10k.yaml   # accuracy, calibration, abstention
 ```
+
+### Model and training stack
+
+| Component | Default | Alternative |
+|---|---|---|
+| Backbone ([factory.py](src/models/factory.py)) | `agcn` — learnable graph topology + multi-scale temporal conv | `stgcn` reproduces the original Phase 1–4 numbers |
+| Input stream ([streams.py](src/datasets/streams.py)) | `joint` | `bone`, `joint_motion`, `bone_motion` — train all four and ensemble |
+| Loss ([losses.py](src/training/losses.py)) | focal (γ=2) + class-balanced weights + label smoothing | `focal_gamma: 0` falls back to cross-entropy |
+| Augmentation ([augment.py](src/datasets/augment.py)) | joint dropout, temporal crop, flip, person swap, scale jitter | remove the `augment:` block to disable |
+
+The four streams are trained separately and fused by summing their *calibrated*
+softmax scores. Bone and motion streams are translation-invariant and largely
+scale-invariant by construction, so they disagree with the joint stream exactly
+where the joint stream is being fooled by absolute pixel geometry:
+
+```
+for %s in (joint bone joint_motion bone_motion) do python -m src.training.train --config configs/unified.yaml --stream %s
+python -m src.evaluation.ensemble --config configs/unified.yaml
+```
+
+### Reading the numbers honestly
+
+`evaluate.py` reports more than accuracy, because accuracy alone hid this
+project's real failure (a model returning P(aggressive) = 1.000 on footage it
+was getting wrong):
+
+- **ECE before/after temperature scaling** — how far the confidence was from the
+  truth. A scalar temperature fitted on validation cannot change any prediction,
+  only make the score mean something.
+- **Conformal abstention** — coverage, abstention rate, and *selective accuracy*
+  (how often the system is right on the windows it chose to answer) at a
+  threshold with a distribution-free guarantee, replacing a hand-tuned pixel gate.
 
 For the **unified model** ([configs/unified.yaml](configs/unified.yaml)), every
 dataset's native classes are collapsed to a binary *aggressive vs. neutral* space
-([src/datasets/taxonomy.py](src/datasets/taxonomy.py)). One command runs the
-pooled aggressive-vs-neutral confusion analysis and the leave-one-dataset-out
-cross-dataset / ablation study:
+([src/datasets/taxonomy.py](src/datasets/taxonomy.py)):
 
 ```
 python -m src.evaluation.cross_dataset --config configs/unified.yaml
+```
+
+This prints two things. **Read the second one.** Pooled accuracy on a random split
+is an upper bound inflated by corpus identity — when several corpora with distinct
+capture rigs are mixed and split at random, the cheapest route to a high score is
+to recognise which corpus a clip came from and apply that corpus's class prior.
+The **leave-one-dataset-out** table trains on every corpus but one and tests on the
+one held out; its mean is the honest generalization estimate.
+
+A degradation benchmark converts "it doesn't work on real CCTV" into a curve, by
+corrupting the held-out split one axis at a time (joint dropout, coordinate noise,
+lost participant, scale error) and reporting accuracy against each:
+
+```
+python -m src.evaluation.robustness --config configs/unified.yaml
 ```
 
 Finally, **temporal localization** answers *when* an incident occurs in a
@@ -136,6 +181,7 @@ CI on every push.
 - [x] **Phase 3 — NTU mutual actions:** relevant-class subset, 3D → 2D projection, unified labels, added to the training set
 - [x] **Phase 4 — Unified model:** binary aggressive-vs-neutral space, cross-dataset evaluation, per-dataset (leave-one-out) ablations, confusion analysis
 - [x] **Phase 5 (stretch):** temporal localization — sliding-window scoring + incident-interval merging to flag *when* in a stream aggression occurs (school-proxy testing still pending suitable footage)
+- [x] **Phase 6 — Generalization & calibration:** adaptive-topology backbone, four-stream ensembling, degradation-targeted augmentation, focal loss + temperature scaling, conformal abstention, and a robustness sweep — aimed at the gap between pooled accuracy and leave-one-dataset-out accuracy
 
 ## Limitations
 

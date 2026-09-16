@@ -32,7 +32,7 @@ import argparse
 
 import numpy as np
 import torch
-import torch.nn as nn
+from torch import nn
 
 DEFAULT_MODEL = "facebook/vjepa2-vitl-fpc64-256"
 
@@ -90,9 +90,7 @@ class VJEPAFeatureExtractor:
         from transformers import AutoModel, AutoVideoProcessor
 
         self.device = torch.device(
-            device
-            if device
-            else ("cuda" if torch.cuda.is_available() else "cpu")
+            device if device else ("cuda" if torch.cuda.is_available() else "cpu")
         )
         # bfloat16 on CUDA only — CPU bf16 matmul support is patchy and slow.
         self.dtype = torch.bfloat16 if self.device.type == "cuda" else torch.float32

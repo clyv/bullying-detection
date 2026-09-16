@@ -7,10 +7,10 @@ from src.datasets.unified_loader import MultiDatasetSkeletonDataset
 
 
 def _write_clip(path, aggressive=None, label_name=None):
-    fields = dict(
-        keypoints=np.random.randn(30, 2, 17, 2).astype("float32"),
-        scores=np.random.rand(30, 2, 17).astype("float32"),
-    )
+    fields = {
+        "keypoints": np.random.randn(30, 2, 17, 2).astype("float32"),
+        "scores": np.random.rand(30, 2, 17).astype("float32"),
+    }
     if aggressive is not None:
         fields["aggressive"] = aggressive
     if label_name is not None:
@@ -90,6 +90,6 @@ def test_cross_dataset_end_to_end(tmp_path):
 
     loo = leave_one_out(cfg, device)
     assert set(loo) == {"ds_a", "ds_b"}
-    for _, (acc, cm) in loo.items():
+    for acc, cm in loo.values():
         assert cm.shape == (2, 2)
         assert cm.sum() == 4  # all four held-out clips classified

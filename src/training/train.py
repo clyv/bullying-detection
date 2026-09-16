@@ -1,14 +1,69 @@
 import argparse
+import math
 import os
 
+import numpy as np
 import torch
-import torch.nn as nn
-import torch.optim as optim
 import yaml
+from torch import nn, optim
 from torch.utils.data import DataLoader, Subset
 
+from src.datasets.augment import AugmentConfig
 from src.datasets.unified_loader import UnifiedSkeletonDataset, split_indices
-from src.models.stgcn import STGCNBaseline
+from src.models.factory import build_model, checkpoint_name
+from src.training.losses import (
+    FocalLoss,
+    class_weights_from_counts,
+    mixup_batch,
+    soft_target_cross_entropy,
+)
+
+
+def build_criterion(config, class_counts=None, device=None):
+    """Loss from config: focal by default, plain CE when ``gamma`` is 0.
+
+    Focal loss is the default because this project's failure mode was saturated
+    confidence, not low accuracy — see src/training/losses.py.
+    """
+    training = config.get("training", {})
+    gamma = float(training.get("focal_gamma", 2.0))
+    smoothing = float(training.get("label_smoothing", 0.0))
+    weight = None
+    if training.get("class_balanced", True) and class_counts is not None:
+        weight = class_weights_from_counts(class_counts, device=device)
+    return FocalLoss(gamma=gamma, weight=weight, label_smoothing=smoothing).to(device)
+
+
+def dataset_labels(dataset, indices=None):
+    """Label array for a dataset (or a subset of it), without decoding tensors.
+
+    MultiDatasetSkeletonDataset already knows every label from its scan; the
+    single-cache loader has to read them, but only the ``label`` field.
+    """
+    if hasattr(dataset, "samples"):
+        labels = np.array([s[2] for s in dataset.samples])
+    elif hasattr(dataset, "labels"):
+        labels = np.asarray(dataset.labels())
+    else:
+        return None
+    return labels if indices is None else labels[np.asarray(indices)]
+
+
+def make_scheduler(optimizer, epochs, warmup_epochs=0):
+    """Linear warmup then cosine decay.
+
+    Warmup matters for the adaptive backbone: its data-dependent adjacency term is
+    unstable in the first few hundred steps when the learning rate starts at full.
+    """
+    warmup_epochs = max(0, min(int(warmup_epochs), max(epochs - 1, 0)))
+
+    def lr_lambda(epoch):
+        if warmup_epochs and epoch < warmup_epochs:
+            return (epoch + 1) / (warmup_epochs + 1)
+        progress = (epoch - warmup_epochs) / max(epochs - warmup_epochs, 1)
+        return 0.5 * (1.0 + math.cos(math.pi * min(progress, 1.0)))
+
+    return optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 
 def fit(
@@ -22,6 +77,11 @@ def fit(
     device,
     checkpoint_dir=None,
     best_path=None,
+    criterion=None,
+    num_classes=2,
+    mixup_alpha=0.0,
+    clip_grad=1.0,
+    warmup_epochs=0,
 ):
     """Train ``model`` in place and return it. Shared by train.py and cross-dataset eval.
 
@@ -29,9 +89,9 @@ def fit(
     seen so far is (re)saved there each time it improves — so evaluation can use
     the best-generalizing weights rather than the (overfit) final epoch.
     """
-    criterion = nn.CrossEntropyLoss()
+    criterion = criterion if criterion is not None else nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    scheduler = make_scheduler(optimizer, epochs, warmup_epochs)
     if checkpoint_dir:
         os.makedirs(checkpoint_dir, exist_ok=True)
     best_acc = -1.0
@@ -42,9 +102,16 @@ def fit(
         for tensors, labels in train_loader:
             tensors, labels = tensors.to(device), labels.to(device)
             optimizer.zero_grad()
-            outputs = model(tensors)
-            loss = criterion(outputs, labels)
+            if mixup_alpha > 0:
+                mixed, soft = mixup_batch(tensors, labels, num_classes, mixup_alpha)
+                outputs = model(mixed)
+                loss = soft_target_cross_entropy(outputs, soft)
+            else:
+                outputs = model(tensors)
+                loss = criterion(outputs, labels)
             loss.backward()
+            if clip_grad:
+                nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
             optimizer.step()
             running_loss += loss.item() * tensors.size(0)
             total += labels.size(0)
@@ -105,8 +172,8 @@ def resolve_device(name="auto"):
     return torch.device(name)
 
 
-def train_model(config_path="configs/baseline.yaml", device="auto"):
-    """Train the ST-GCN baseline on a single-dataset pose cache from a YAML config."""
+def train_model(config_path="configs/baseline.yaml", device="auto", stream="joint"):
+    """Train the configured model on a single-dataset pose cache from a YAML config."""
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Configuration file missing at {config_path}")
     with open(config_path, "r") as f:
@@ -118,16 +185,18 @@ def train_model(config_path="configs/baseline.yaml", device="auto"):
     seed = config["training"].get("seed", 42)
     val_frac = config["data"].get("val_frac", 0.15)
     test_frac = config["data"].get("test_frac", 0.15)
+    num_classes = config["model"]["num_classes"]
     # Checkpoints are namespaced per experiment so datasets don't overwrite each other.
     experiment = config.get("experiment", "default")
     checkpoint_dir = os.path.join("outputs/checkpoints", experiment)
 
     device = resolve_device(device)
+    torch.manual_seed(seed)
     print(f"Using execution device: {device}")
-    print(f"Loading unified dataset from cache: {pose_cache}")
+    print(f"Loading unified dataset from cache: {pose_cache}  (stream={stream})")
     normalize = config["data"].get("normalize", False)
     full_dataset = UnifiedSkeletonDataset(
-        pose_cache, num_frames, normalize, config["data"]["max_persons"]
+        pose_cache, num_frames, normalize, config["data"]["max_persons"], stream=stream
     )
     if len(full_dataset) == 0:
         print(
@@ -142,15 +211,19 @@ def train_model(config_path="configs/baseline.yaml", device="auto"):
         f"Split (seed={seed}): train={len(train_idx)} val={len(val_idx)} "
         f"test={len(test_idx)} (test held out for evaluation)"
     )
-    train_loader = DataLoader(Subset(full_dataset, train_idx), batch_size=batch_size, shuffle=True)
+
+    # Augmentation applies to the training subset only — a clone sharing the scan.
+    augment = AugmentConfig.from_dict(config.get("augment"))
+    train_source = full_dataset.with_augment(augment) if augment else full_dataset
+    if augment:
+        print(f"Augmentation: {augment}")
+    train_loader = DataLoader(Subset(train_source, train_idx), batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(Subset(full_dataset, val_idx), batch_size=batch_size, shuffle=False)
 
-    model = STGCNBaseline(
-        in_channels=config["model"]["in_channels"],
-        num_classes=config["model"]["num_classes"],
-        num_persons=config["data"]["max_persons"],
-        graph_strategy="spatial",
-    ).to(device)
+    model = build_model(config).to(device)
+    counts = _label_counts(full_dataset, train_idx, num_classes)
+    criterion = build_criterion(config, counts, device)
+    print(f"Model: {config['model'].get('name', 'stgcn')} | class counts (train): {counts}")
 
     print(f"Starting training loop ({config['training']['epochs']} epochs)...")
     fit(
@@ -162,14 +235,33 @@ def train_model(config_path="configs/baseline.yaml", device="auto"):
         weight_decay=config["training"]["weight_decay"],
         device=device,
         checkpoint_dir=checkpoint_dir,
-        best_path=os.path.join(checkpoint_dir, "stgcn_best.pt"),
+        best_path=os.path.join(checkpoint_dir, checkpoint_name(config, stream)),
+        criterion=criterion,
+        num_classes=num_classes,
+        mixup_alpha=config["training"].get("mixup_alpha", 0.0),
+        clip_grad=config["training"].get("clip_grad", 1.0),
+        warmup_epochs=config["training"].get("warmup_epochs", 0),
     )
     print(f"Training loop completed. Checkpoints in {checkpoint_dir}")
 
 
+def _label_counts(dataset, indices, num_classes):
+    """Per-class sample counts on the training indices (None-safe)."""
+    labels = dataset_labels(dataset, indices)
+    if labels is None:
+        labels = np.array([int(dataset[i][1]) for i in indices])
+    return np.bincount(labels, minlength=num_classes).tolist()
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train the ST-GCN baseline.")
+    parser = argparse.ArgumentParser(description="Train the skeleton action classifier.")
     parser.add_argument("--config", default="configs/baseline.yaml")
     parser.add_argument("--device", default="auto", help='"auto", "cpu", or "cuda"')
+    parser.add_argument(
+        "--stream",
+        default="joint",
+        choices=("joint", "bone", "joint_motion", "bone_motion"),
+        help="input representation; train all four and ensemble for the best result",
+    )
     args = parser.parse_args()
-    train_model(args.config, args.device)
+    train_model(args.config, args.device, args.stream)

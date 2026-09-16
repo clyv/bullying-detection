@@ -98,13 +98,21 @@ def test_evaluate_end_to_end(tmp_path):
 
     from src.evaluation.evaluate import evaluate
 
+    # Pinned to CPU: CI has no GPU, and a developer box with a mismatched CUDA
+    # build would otherwise fail here for reasons unrelated to the code under test.
     # split="all" scores every clip (n=12); the default "test" split scores a subset.
-    result = evaluate(config_path=str(cfg_path), checkpoint=str(ckpt), split="all")
+    result = evaluate(config_path=str(cfg_path), checkpoint=str(ckpt), split="all", device="cpu")
     assert result is not None
     assert 0.0 <= result["accuracy"] <= 1.0
     assert result["confusion_matrix"].shape == (6, 6)
     assert result["confusion_matrix"].sum() == 12
 
-    held_out = evaluate(config_path=str(cfg_path), checkpoint=str(ckpt), split="test")
+    held_out = evaluate(config_path=str(cfg_path), checkpoint=str(ckpt), split="test", device="cpu")
     assert 0 < held_out["confusion_matrix"].sum() < 12  # only the held-out slice
     assert result["confusion_matrix"].sum() == 12  # every clip classified
+
+    # Calibration runs whenever a validation slice exists and the scored split is
+    # not itself validation — a saturated score is the bug this guards against.
+    assert "temperature" in held_out and held_out["temperature"] > 0
+    assert 0.0 <= held_out["ece"] <= 1.0
+    assert 0.0 <= held_out["abstention"]["abstention_rate"] <= 1.0

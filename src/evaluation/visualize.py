@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import argparse
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 
 import numpy as np
 
@@ -271,7 +271,10 @@ def output_stem(video_path, run_name=None, unique=True):
     if run_name:
         return f"{stem}_{run_name}"
     if unique:
-        return f"{stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # Local wall-clock time (via an explicit UTC now, so the call is tz-aware):
+        # an operator matching this filename against a camera log thinks in local time.
+        local_now = datetime.now(UTC).astimezone()
+        return f"{stem}_{local_now.strftime('%Y%m%d_%H%M%S')}"
     return stem
 
 
@@ -499,7 +502,7 @@ def run(
         graph_strategy="spatial",
     ).to(device)
     state = torch.load(checkpoint, map_location=device, weights_only=False)
-    model.load_state_dict(state["model_state_dict"] if "model_state_dict" in state else state)
+    model.load_state_dict(state.get("model_state_dict", state))
 
     motion_floor = crowd_cfg.get("motion_floor", 0.5)
     motion_saturate = crowd_cfg.get("motion_saturate", 2.0)

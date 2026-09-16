@@ -78,12 +78,47 @@ def latest_checkpoint(checkpoint_dir: str) -> str | None:
     return max(files, key=os.path.getmtime) if files else None
 
 
-def default_checkpoint(checkpoint_dir: str) -> str | None:
-    """Prefer a *best* checkpoint (best validation accuracy) over the newest epoch."""
+def default_checkpoint(checkpoint_dir: str, preferred: str | None = None) -> str | None:
+    """Prefer an exact per-(model, stream) name, then the same architecture, then any.
+
+    The exact-name lookup matters once four streams train into one experiment
+    directory: "newest *best*.pt" would otherwise hand back whichever stream
+    finished last. The architecture-scoped fallback matters because handing an
+    ``agcn`` config a leftover ``stgcn`` checkpoint fails deep inside
+    ``load_state_dict`` with an unreadable shape error.
+    """
+    if preferred:
+        exact = os.path.join(checkpoint_dir, preferred)
+        if os.path.exists(exact):
+            return exact
+        architecture = preferred.split("_")[0]
+        same_arch = glob.glob(os.path.join(checkpoint_dir, f"{architecture}*best*.pt"))
+        if same_arch:
+            return max(same_arch, key=os.path.getmtime)
     best = glob.glob(os.path.join(checkpoint_dir, "*best*.pt"))
     if best:
         return max(best, key=os.path.getmtime)
     return latest_checkpoint(checkpoint_dir)
+
+
+def collect_logits(model, loader, device):
+    """Run inference and return (logits, targets) as numpy arrays.
+
+    Returns logits rather than predictions so calibration and conformal abstention
+    can work from the raw scores; argmax is recoverable, the reverse is not.
+    """
+    import torch
+
+    model.eval()
+    logits, targets = [], []
+    with torch.no_grad():
+        for tensors, labels in loader:
+            outputs = model(tensors.to(device))
+            logits.append(outputs.cpu().numpy())
+            targets.append(labels.numpy())
+    if not logits:
+        return np.zeros((0, 2)), np.zeros(0, dtype=int)
+    return np.concatenate(logits), np.concatenate(targets)
 
 
 def evaluate(
@@ -91,11 +126,17 @@ def evaluate(
     checkpoint: str | None = None,
     split: str = "test",
     device: str = "auto",
+    stream: str = "joint",
+    alpha: float = 0.1,
 ) -> dict | None:
-    """Run inference and return {'accuracy', 'confusion_matrix'} (or None if nothing to do).
+    """Run inference and return {'accuracy', 'confusion_matrix', ...} (None if nothing to do).
 
     ``split`` is one of "test" (default, held-out), "val", "train", or "all".
     ``device`` is "auto" (cuda if available else cpu), "cpu", or "cuda".
+
+    Besides accuracy, this fits a temperature on the **validation** split and reports
+    ECE before/after plus a conformal abstention summary at level ``alpha``. Those
+    three numbers are what tell you whether a confident-looking score means anything.
     """
     import yaml
 
@@ -106,7 +147,15 @@ def evaluate(
     from torch.utils.data import DataLoader, Subset
 
     from src.datasets.unified_loader import UnifiedSkeletonDataset, split_indices
-    from src.models.stgcn import STGCNBaseline
+    from src.evaluation.calibrate import (
+        abstention_report,
+        conformal_threshold,
+        expected_calibration_error,
+        fit_temperature,
+        format_calibration,
+        softmax,
+    )
+    from src.models.factory import build_model, checkpoint_name
 
     pose_cache = config["data"]["pose_cache"]
     num_classes = config["model"]["num_classes"]
@@ -116,23 +165,26 @@ def evaluate(
         config["data"]["num_frames"],
         config["data"].get("normalize", False),
         config["data"]["max_persons"],
+        stream=stream,
     )
     if len(dataset) == 0:
         print(f"[warning] No .npz files in {pose_cache}; nothing to evaluate.")
         return None
 
+    seed = config["training"].get("seed", 42)
+    val_frac = config["data"].get("val_frac", 0.15)
+    test_frac = config["data"].get("test_frac", 0.15)
+    train_idx, val_idx, test_idx = split_indices(len(dataset), seed, val_frac, test_frac)
     if split == "all":
         subset = dataset
     else:
-        seed = config["training"].get("seed", 42)
-        val_frac = config["data"].get("val_frac", 0.15)
-        test_frac = config["data"].get("test_frac", 0.15)
-        train_idx, val_idx, test_idx = split_indices(len(dataset), seed, val_frac, test_frac)
         subset = Subset(dataset, {"train": train_idx, "val": val_idx, "test": test_idx}[split])
 
     # Checkpoints are namespaced per experiment (set by train.py).
     experiment = config.get("experiment", "default")
-    checkpoint = checkpoint or default_checkpoint(os.path.join("outputs/checkpoints", experiment))
+    checkpoint = checkpoint or default_checkpoint(
+        os.path.join("outputs/checkpoints", experiment), checkpoint_name(config, stream)
+    )
     if checkpoint is None or not os.path.exists(checkpoint):
         print(
             f"[error] No checkpoint for experiment '{experiment}'. "
@@ -145,31 +197,42 @@ def evaluate(
         if device == "auto"
         else torch.device(device)
     )
-    model = STGCNBaseline(
-        in_channels=config["model"]["in_channels"],
-        num_classes=num_classes,
-        num_persons=config["data"]["max_persons"],
-        graph_strategy="spatial",
-    ).to(torch_device)
+    model = build_model(config).to(torch_device)
     state = torch.load(checkpoint, map_location=torch_device, weights_only=False)
-    model.load_state_dict(state["model_state_dict"] if "model_state_dict" in state else state)
+    model.load_state_dict(state.get("model_state_dict", state))
     model.eval()
     device = torch_device
-    print(f"Loaded checkpoint: {checkpoint}  (device={device})")
+    print(f"Loaded checkpoint: {checkpoint}  (device={device}, stream={stream})")
     print(f"Evaluating on '{split}' split: n={len(subset)}")
 
-    loader = DataLoader(subset, batch_size=config["training"]["batch_size"], shuffle=False)
-    preds, targets = [], []
-    with torch.no_grad():
-        for tensors, labels in loader:
-            outputs = model(tensors.to(device))
-            preds.extend(outputs.argmax(dim=1).cpu().numpy().tolist())
-            targets.extend(labels.numpy().tolist())
+    batch_size = config["training"]["batch_size"]
+    logits, targets = collect_logits(model, DataLoader(subset, batch_size=batch_size), device)
 
-    cm = confusion_matrix(np.array(preds), np.array(targets), num_classes)
-    acc = accuracy(np.array(preds), np.array(targets))
+    preds = logits.argmax(axis=1)
+    cm = confusion_matrix(preds, targets, num_classes)
+    acc = accuracy(preds, targets)
     print(format_report(cm, acc, config["model"].get("class_names")))
-    return {"accuracy": acc, "confusion_matrix": cm}
+
+    result = {"accuracy": acc, "confusion_matrix": cm, "logits": logits, "targets": targets}
+
+    # Calibration is fitted on validation and *applied* to whatever split we scored,
+    # so the temperature never sees the data it is judged on.
+    if split != "val" and len(val_idx) > 0:
+        val_logits, val_targets = collect_logits(
+            model, DataLoader(Subset(dataset, val_idx), batch_size=batch_size), device
+        )
+        temperature = fit_temperature(val_logits, val_targets)
+        before = expected_calibration_error(softmax(logits), targets)
+        after = expected_calibration_error(softmax(logits, temperature), targets)
+        threshold = conformal_threshold(softmax(val_logits, temperature), val_targets, alpha)
+        report = abstention_report(softmax(logits, temperature), targets, threshold)
+        print()
+        print(format_calibration(temperature, before, after, report))
+        print(f"  conformal q      {threshold:.4f}  (alpha={alpha})")
+        result.update(
+            temperature=temperature, ece=after, conformal_threshold=threshold, abstention=report
+        )
+    return result
 
 
 def main() -> None:
@@ -189,8 +252,14 @@ def main() -> None:
         help="which split to score",
     )
     parser.add_argument("--device", default="auto", help='"auto", "cpu", or "cuda"')
+    parser.add_argument(
+        "--stream", default="joint", choices=("joint", "bone", "joint_motion", "bone_motion")
+    )
+    parser.add_argument(
+        "--alpha", type=float, default=0.1, help="conformal miscoverage level (default 0.1)"
+    )
     args = parser.parse_args()
-    evaluate(args.config, args.checkpoint, args.split, args.device)
+    evaluate(args.config, args.checkpoint, args.split, args.device, args.stream, args.alpha)
 
 
 if __name__ == "__main__":

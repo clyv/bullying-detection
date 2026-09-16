@@ -8,9 +8,14 @@ data:
   pose_cache: outputs/ntu_poses    # .npz from ntu_skeleton.py --classes relevant
   num_frames: 64
   max_persons: 2
+  val_frac: 0.15
+  test_frac: 0.15
+  normalize: true                  # camera-resolution-invariant skeletons
 
 model:
-  name: stgcn
+  # 'agcn' = learnable topology + multi-scale TCN; 'stgcn' reproduces Phase 3 numbers.
+  name: agcn
+  dropout: 0.3
   num_classes: 18
   class_names: [punch_slap, kicking, pushing, hit_with_object, wield_knife,
                 knock_over, grab_stuff, step_on_foot, point_finger, shake_fist,
@@ -27,3 +32,19 @@ training:
   scheduler: cosine
   device: cuda
   seed: 42
+  focal_gamma: 2.0
+  label_smoothing: 0.05
+  class_balanced: true
+  warmup_epochs: 3
+  clip_grad: 1.0
+
+augment:
+  joint_dropout: 0.1
+  person_dropout: 0.05
+  coord_noise: 0.02
+  flip_prob: 0.5
+  person_swap_prob: 0.5
+  temporal_crop: 0.2
+  scale_jitter: 0.2
+  rotate_degrees: 15.0
+  shear: 0.1

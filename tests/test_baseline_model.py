@@ -20,7 +20,7 @@ def test_coerce_persons_truncates_to_most_visible():
     # everyone else invisible
     kp[:, 3] = 7.0
     kp[:, 6] = 9.0
-    out_kp, out_sc = coerce_persons(kp, scores, max_persons=2)
+    out_kp, _out_sc = coerce_persons(kp, scores, max_persons=2)
     assert out_kp.shape == (5, 2, 17, 2)
     # the two most-visible people (3 then 6), kept in sorted index order
     assert (out_kp[:, 0] == 7.0).all() and (out_kp[:, 1] == 9.0).all()
