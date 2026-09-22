@@ -151,6 +151,32 @@ to recognise which corpus a clip came from and apply that corpus's class prior.
 The **leave-one-dataset-out** table trains on every corpus but one and tests on the
 one held out; its mean is the honest generalization estimate.
 
+Two further guards against a flattering headline:
+
+- **By-source breakdown.** The pooled report splits accuracy by source corpus. One
+  run's 88% pooled figure turned out to be 95.8% on Bullying10K and 87.1% on NTU,
+  but only 55–62% on the real-CCTV corpora it had trained on. The two lab datasets
+  are over 90% of the pool.
+- **Motion-energy baseline.** Each leave-one-dataset-out fold also scores a single
+  threshold on how fast the most agitated person moves
+  ([baselines.py](src/evaluation/baselines.py)), fitted on the training corpora.
+  The `gain` column is what the model knows beyond "someone is moving fast". It was
+  +5.3 points on average, near zero on NTU (whose actors mime violence slowly) and
+  UBI-Fights, and *negative* on fight-surv. The threshold alone scores 40.1% on
+  held-out Bullying10K — the same figure the original ST-GCN collapsed to there,
+  which suggests that collapse was this shortcut.
+
+| Held out (AGCN, joint stream) | Model | Motion energy | Gain |
+|---|---|---|---|
+| UT-Interaction | 77.5% | 68.3% | +9.2 |
+| Bullying10K | 62.5% | 40.1% | +22.4 |
+| NTU RGB+D | 54.9% | 51.9% | +3.0 |
+| UBI-Fights | 55.2% | 53.8% | +1.4 |
+| fight-surv | 55.7% | 65.0% | −9.3 |
+| **Mean** | **61.1%** | **55.8%** | **+5.3** |
+
+Pooled test accuracy for the same model is 88.2%.
+
 A degradation benchmark converts "it doesn't work on real CCTV" into a curve, by
 corrupting the held-out split one axis at a time (joint dropout, coordinate noise,
 lost participant, scale error) and reporting accuracy against each:

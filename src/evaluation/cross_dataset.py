@@ -153,14 +153,35 @@ def per_dataset_report(preds, targets, sources):
     return "\n".join(lines)
 
 
-def pool_energies(dataset):
-    """Motion energy for every clip in a pooled dataset, keyed by file path."""
+ENERGY_CACHE = os.path.join("outputs", "cache", "motion_energy.json")
+
+
+def pool_energies(dataset, cache_path=ENERGY_CACHE):
+    """Motion energy for every clip in a pooled dataset, keyed by file path.
+
+    Cached on disk, keyed by path and modification time: reading all ~29k clips
+    took 23 minutes on a laptop on battery, which is not worth repeating on every
+    leave-one-dataset-out run when the clips haven't changed.
+    """
     from src.evaluation.baselines import clip_motion_energy
 
-    energies = {}
+    cache = {}
+    if cache_path and os.path.exists(cache_path):
+        with open(cache_path) as f:
+            cache = json.load(f)
+    energies, computed = {}, 0
     for path, _, _ in dataset.samples:
-        with np.load(path) as data:
-            energies[path] = clip_motion_energy(data["keypoints"], data["scores"])
+        key = f"{path}|{os.path.getmtime(path):.0f}"
+        if key not in cache:
+            with np.load(path) as data:
+                cache[key] = clip_motion_energy(data["keypoints"], data["scores"])
+            computed += 1
+        energies[path] = cache[key]
+    if computed and cache_path:
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        with open(cache_path, "w") as f:
+            json.dump(cache, f)
+    print(f"[baseline] motion energy: {computed} computed, {len(energies) - computed} cached")
     return energies
 
 

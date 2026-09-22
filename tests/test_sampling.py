@@ -81,6 +81,37 @@ def test_per_dataset_report_handles_a_single_class_source():
     assert "-" in report  # no aggressive clips: recall undefined, not a crash
 
 
+def test_pool_energies_caches_and_invalidates_on_change(tmp_path):
+    from types import SimpleNamespace
+
+    from src.evaluation.cross_dataset import pool_energies
+
+    clip = tmp_path / "clip.npz"
+    rng = np.random.default_rng(0)
+    kp = rng.uniform(0, 100, (10, 2, 17, 2)).astype("float32")
+    np.savez(clip, keypoints=kp, scores=np.ones((10, 2, 17), "float32"))
+    ds = SimpleNamespace(samples=[(str(clip), "x", 0)])
+    cache = tmp_path / "cache.json"
+
+    first = pool_energies(ds, str(cache))
+    assert cache.exists()
+    assert pool_energies(ds, str(cache)) == first  # served from cache
+
+    # A re-extracted clip (new mtime) must be recomputed, not served stale.
+    import os
+    import time
+
+    np.savez(clip, keypoints=kp * 3.0 + 50.0, scores=np.ones((10, 2, 17), "float32"))
+    later = time.time() + 5
+    os.utime(clip, (later, later))
+    pool_energies(ds, str(cache))
+    # Energy is scale-invariant, so the value can't tell a recompute from a stale hit;
+    # a second cache entry (new mtime key) can.
+    import json
+
+    assert len(json.loads(cache.read_text())) == 2
+
+
 def test_fit_returns_the_best_validation_weights(tmp_path):
     # The printed test number must describe the checkpoint on disk.
     from torch.utils.data import DataLoader, TensorDataset

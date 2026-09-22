@@ -49,6 +49,10 @@ training:
   mixup_alpha: 0.0       # >0 enables skeleton mixup (disables focal loss that epoch)
   # Corpus-balanced sampling (src/training/sampling.py): 0 = natural mix, where real
   # CCTV is ~7% of every batch; 0.5 = sqrt-tempered; 1 = every corpus equal.
+  # Ablated 22 Sep 2026 (per-corpus val, 8-epoch compressed schedule): UBI stayed at
+  # 51-56% under every setting while NTU fell 13-16 points at 0.5 and 1.0, and
+  # lr 0.003 was no better than 0.01. Resampling can't add CCTV information that
+  # isn't in the clips — kept off.
   dataset_balance: 0.0
 
 # Training-split-only augmentation. Chosen against measured failure modes rather
