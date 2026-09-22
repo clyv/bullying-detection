@@ -84,7 +84,7 @@ def run(config_path="configs/unified.yaml", split="test", device="auto", stream=
         split_indices,
     )
     from src.evaluation.evaluate import default_checkpoint
-    from src.models.factory import build_model, checkpoint_name
+    from src.models.factory import checkpoint_name, load_for_inference
 
     with open(config_path) as f:
         config = yaml.safe_load(f)
@@ -124,9 +124,9 @@ def run(config_path="configs/unified.yaml", split="test", device="auto", stream=
         if device == "auto"
         else torch.device(device)
     )
-    model = build_model(config).to(torch_device)
-    state = torch.load(ckpt, map_location=torch_device, weights_only=False)
-    model.load_state_dict(state.get("model_state_dict", state))
+    model, base.normalize = load_for_inference(
+        ckpt, config, torch_device, config["model"]["num_classes"]
+    )
 
     train_idx, val_idx, test_idx = split_indices(
         len(base),

@@ -65,6 +65,45 @@ def test_normalize_skeleton_is_resolution_invariant():
     assert abs(float(small.std()) - 1.0) < 1e-2
 
 
+def test_normalize_skeleton_is_invariant_to_frame_position():
+    # Regression: the test above shifts x and y by the *same* offset, the one case
+    # where pooling both axes into one std happens to be right. A person at
+    # x~1500, y~300 is not that case — the old scale grew with |mean_x - mean_y|,
+    # leaking where in frame people stood (and so which dataset a clip came from).
+    rng = np.random.default_rng(1)
+    pose = rng.uniform(0, 100, size=(8, 2, 17, 2)).astype("float32")
+    scores = np.ones((8, 2, 17), dtype="float32")
+    centre = normalize_skeleton(pose + np.array([500.0, 500.0], dtype="float32"), scores)
+    corner = normalize_skeleton(pose + np.array([1500.0, 300.0], dtype="float32"), scores)
+    assert np.allclose(centre, corner, atol=1e-3)
+    # Unit RMS about the per-axis mean, wherever the subject stands.
+    rms = float(np.sqrt((corner.reshape(-1, 2) ** 2).mean()))
+    assert abs(rms - 1.0) < 1e-3
+
+
+def test_normalize_skeleton_legacy_reproduces_the_old_scale():
+    # Checkpoints trained before the fix must still get the inputs they learned on.
+    rng = np.random.default_rng(2)
+    kp = rng.uniform(0, 100, size=(4, 2, 17, 2)).astype("float32") + np.array(
+        [1500.0, 300.0], dtype="float32"
+    )
+    scores = np.ones((4, 2, 17), dtype="float32")
+    valid = kp.reshape(-1, 2)
+    expected = (kp - valid.mean(axis=0)) / (valid.std() + 1e-6)
+    assert np.allclose(normalize_skeleton(kp, scores, legacy=True), expected, atol=1e-4)
+    # And the legacy scale really is the position-dependent one.
+    assert not np.allclose(normalize_skeleton(kp, scores), expected, atol=1e-2)
+
+
+def test_features_to_tensor_accepts_legacy_normalize_mode():
+    rng = np.random.default_rng(3)
+    kp = rng.uniform(0, 100, size=(20, 2, 17, 2)).astype("float32") + 800.0
+    scores = np.ones((20, 2, 17), dtype="float32")
+    fixed = features_to_tensor(kp, scores, 16, normalize=True)
+    legacy = features_to_tensor(kp, scores, 16, normalize="legacy")
+    assert fixed.shape == legacy.shape == (3, 16, 17, 2)
+
+
 def test_normalize_skeleton_keeps_missing_joints_zero():
     kp = np.ones((4, 2, 17, 2), dtype="float32")
     scores = np.ones((4, 2, 17), dtype="float32")

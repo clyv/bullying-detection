@@ -20,22 +20,33 @@ CLASS_KEYWORDS = {
 }
 
 
-def normalize_skeleton(kp, scores):
+def normalize_skeleton(kp, scores, legacy=False):
     """Center + scale a clip's keypoints into a camera-resolution-invariant space.
 
     Using only visible joints (score > 0), subtract the per-axis mean and divide
-    by the overall std (a single scalar, so the x/y aspect and the geometry
-    between the two people are preserved). Missing joints stay at 0. This removes
-    the absolute pixel position/scale that otherwise lets the model shortcut on a
-    dataset's coordinate range instead of the motion itself.
+    by the RMS distance from that mean (a single scalar, so the x/y aspect and the
+    geometry between the two people are preserved). Missing joints stay at 0. This
+    removes the absolute pixel position/scale that otherwise lets the model shortcut
+    on a dataset's coordinate range instead of the motion itself.
+
+    ``legacy=True`` reproduces the original scale, which took the std of x and y
+    *pooled*, i.e. about their combined mean rather than each axis's own. That made
+    the scale grow with |mean_x - mean_y| — where in frame people stood — so it
+    leaked frame position, and through it dataset identity (NTU clips landed at
+    ~0.53x the intended scale, Bullying10K at ~0.86x). Kept only so checkpoints
+    trained before the fix can run on the inputs they were trained on; select it
+    with ``normalize: legacy`` in the config.
     """
     mask = scores > 0  # (T, M, 17)
     if not mask.any():
         return kp
     valid = kp[mask]  # (K, 2)
     mean = valid.mean(axis=0)
-    std = float(valid.std()) + 1e-6
-    normed = (kp - mean) / std
+    if legacy:
+        scale = float(valid.std())
+    else:
+        scale = float(np.sqrt(((valid - mean) ** 2).mean()))
+    normed = (kp - mean) / (scale + 1e-6)
     return np.where(mask[..., None], normed, 0.0).astype(np.float32)
 
 
@@ -88,7 +99,9 @@ def features_to_tensor(
         rng = rng if rng is not None else np.random.default_rng()
         kp, scores = apply_structural(kp, scores, rng, augment)
     if normalize:
-        kp = normalize_skeleton(kp, scores)
+        # ``normalize`` is True/False from most configs, or the string "legacy" to
+        # reproduce the pre-fix scale for checkpoints trained on it.
+        kp = normalize_skeleton(kp, scores, legacy=normalize == "legacy")
     if augment is not None:
         kp = apply_geometric(kp, rng, augment)
     T = kp.shape[0]

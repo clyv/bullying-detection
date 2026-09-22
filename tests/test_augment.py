@@ -128,6 +128,21 @@ def test_scale_jitter_changes_scale_but_not_shape():
     assert np.allclose(ratios, ratios[0], atol=1e-4)  # one uniform scale factor
 
 
+def test_extent_is_the_skeleton_size_not_the_frame_position():
+    # Regression: the extent once mixed axes (max of all coords minus min of all), so
+    # an 80px person sitting at x~1500, y~300 measured ~1200px and got 15x the
+    # intended coordinate noise. Size must not depend on where in frame they stand.
+    from src.datasets.augment import _extent
+
+    rng = np.random.default_rng(12)
+    person = rng.uniform(0, 80, size=(10, 1, 17, 2)).astype("float32")
+    scores = np.ones((10, 1, 17), dtype="float32")
+    near_origin = _extent(person, scores)
+    off_diagonal = person + np.array([1500.0, 300.0], dtype="float32")
+    assert abs(_extent(off_diagonal, scores) - near_origin) < 1e-3
+    assert near_origin <= 80.0
+
+
 def test_from_dict_disables_on_empty_and_ignores_unknown_keys():
     assert AugmentConfig.from_dict(None) is None
     assert AugmentConfig.from_dict({}) is None

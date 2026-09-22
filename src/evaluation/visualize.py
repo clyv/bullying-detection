@@ -25,7 +25,10 @@ judgement.
 
 Usage:
     python -m src.evaluation.visualize --video clip.mp4 \\
-        --checkpoint outputs/checkpoints/phase4_unified/stgcn_best.pt --output outputs/review
+        --checkpoint outputs/checkpoints/phase4_unified/agcn_best.pt --output outputs/review
+
+Either architecture loads: the checkpoint records (or, for older files, reveals
+through its weight names) which model it holds and how it was normalized.
 """
 
 from __future__ import annotations
@@ -460,14 +463,13 @@ def run(
     import yaml
 
     from src.evaluation.localize import score_stream, score_stream_pairs
-    from src.models.stgcn import STGCNBaseline
+    from src.models.factory import load_for_inference
 
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
     loc = cfg.get("localization", {})
     window, stride = loc.get("window", 64), loc.get("stride", 16)
     threshold, max_gap = loc.get("threshold", 0.5), loc.get("max_gap", 0)
-    normalize = cfg["data"].get("normalize", False)
     crowd_cfg = cfg.get("crowd", {})
     extract_persons = max_persons or crowd_cfg.get("max_persons", 16)
     pressure_weight = crowd_cfg.get("pressure_weight", 1.5)
@@ -495,14 +497,11 @@ def run(
     n_persons = keypoints.shape[1] if num_frames else 0
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = STGCNBaseline(
-        in_channels=cfg["model"]["in_channels"],
-        num_classes=2,
-        num_persons=2,  # the classifier always scores two-person interactions
-        graph_strategy="spatial",
-    ).to(device)
-    state = torch.load(checkpoint, map_location=device, weights_only=False)
-    model.load_state_dict(state.get("model_state_dict", state))
+    # The classifier always scores two-person interactions, whatever the crowd size.
+    two_person_cfg = {**cfg, "data": {**cfg["data"], "max_persons": 2}}
+    # Architecture and normalization come from the checkpoint, not the config, so an
+    # older stgcn checkpoint and a new agcn one each get the inputs they learned on.
+    model, normalize = load_for_inference(checkpoint, two_person_cfg, device)
 
     motion_floor = crowd_cfg.get("motion_floor", 0.5)
     motion_saturate = crowd_cfg.get("motion_saturate", 2.0)

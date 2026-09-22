@@ -190,9 +190,11 @@ class AGCN(nn.Module):
             ]
         )
         self.dropout = nn.Dropout(dropout)
+        # PyTorch's default Linear init, deliberately. 2s-AGCN's std=sqrt(2/num_classes)
+        # was tuned for 60 classes (std 0.18); at 2 classes it is std 1.0, which over 256
+        # features put 64% of real clips at P > 0.99 before the first step. The pooled
+        # run then spent its opening epochs escaping that saturation and sat at chance.
         self.fc = nn.Linear(c3, num_classes)
-        nn.init.normal_(self.fc.weight, 0, (2.0 / num_classes) ** 0.5)
-        nn.init.zeros_(self.fc.bias)
 
     def forward(self, x):
         n, c, t, v, m = x.size()

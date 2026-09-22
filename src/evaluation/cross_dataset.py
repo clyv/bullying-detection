@@ -51,10 +51,10 @@ def evaluate_model(model, loader, device, num_classes=2):
     return accuracy(preds, targets), cm
 
 
-def _train_binary(train_ds, val_ds, cfg, device, best_path=None, class_counts=None):
+def _train_binary(train_ds, val_ds, cfg, device, best_path=None, class_counts=None, stream="joint"):
     from torch.utils.data import DataLoader
 
-    from src.models.factory import build_model
+    from src.models.factory import build_model, checkpoint_meta
     from src.training.train import build_criterion, fit
 
     model = build_model(cfg, num_classes=2).to(device)
@@ -73,6 +73,7 @@ def _train_binary(train_ds, val_ds, cfg, device, best_path=None, class_counts=No
         mixup_alpha=cfg["training"].get("mixup_alpha", 0.0),
         clip_grad=cfg["training"].get("clip_grad", 1.0),
         warmup_epochs=cfg["training"].get("warmup_epochs", 0),
+        checkpoint_meta=checkpoint_meta(cfg, stream),
     )
     return model
 
@@ -134,6 +135,7 @@ def pooled_evaluation(cfg, device, stream="joint"):
         device,
         best_path=best_path,
         class_counts=_counts(ds, train_idx),
+        stream=stream,
     )
     acc, cm = evaluate_model(
         model,
@@ -188,6 +190,7 @@ def leave_one_out(cfg, device, resume_index=0, ckpt_path=None, stream="joint"):
             cfg,
             device,
             class_counts=_counts(train_ds, inner_train),
+            stream=stream,
         )
         acc, cm = evaluate_model(
             model, DataLoader(test_ds, batch_size=cfg["training"]["batch_size"]), device

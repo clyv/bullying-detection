@@ -73,7 +73,7 @@ def run(config_path="configs/unified.yaml", split="test", device="auto", alpha=0
         UnifiedSkeletonDataset,
         split_indices,
     )
-    from src.models.factory import build_model
+    from src.models.factory import load_for_inference
 
     with open(config_path) as f:
         config = yaml.safe_load(f)
@@ -132,9 +132,9 @@ def run(config_path="configs/unified.yaml", split="test", device="auto", alpha=0
     test_probs, val_probs, targets, val_targets = [], [], None, None
     for stream, path in available.items():
         dataset = base.with_stream(stream)
-        model = build_model(config).to(torch_device)
-        state = torch.load(path, map_location=torch_device, weights_only=False)
-        model.load_state_dict(state.get("model_state_dict", state))
+        # Per stream: each checkpoint may have been trained under a different
+        # normalization, and the clone lets each one get its own.
+        model, dataset.normalize = load_for_inference(path, config, torch_device, num_classes)
 
         logits, tgt = collect_logits(
             model, DataLoader(Subset(dataset, index), batch_size=batch_size), torch_device

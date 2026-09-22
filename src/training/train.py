@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader, Subset
 
 from src.datasets.augment import AugmentConfig
 from src.datasets.unified_loader import UnifiedSkeletonDataset, split_indices
-from src.models.factory import build_model, checkpoint_name
+from src.models.factory import build_model, checkpoint_meta, checkpoint_name
 from src.training.losses import (
     FocalLoss,
     class_weights_from_counts,
@@ -82,13 +82,19 @@ def fit(
     mixup_alpha=0.0,
     clip_grad=1.0,
     warmup_epochs=0,
+    checkpoint_meta=None,
 ):
     """Train ``model`` in place and return it. Shared by train.py and cross-dataset eval.
 
     If ``best_path`` is given, the checkpoint with the highest validation accuracy
     seen so far is (re)saved there each time it improves — so evaluation can use
     the best-generalizing weights rather than the (overfit) final epoch.
+
+    ``checkpoint_meta`` (see models.factory.checkpoint_meta) is written into every
+    saved file so inference tools can rebuild the right architecture and feed it
+    the normalization it was trained on, whatever the config says by then.
     """
+    meta = dict(checkpoint_meta or {})
     criterion = criterion if criterion is not None else nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = make_scheduler(optimizer, epochs, warmup_epochs)
@@ -129,7 +135,12 @@ def fit(
         if best_path and v_acc > best_acc:
             best_acc = v_acc
             torch.save(
-                {"epoch": epoch, "model_state_dict": model.state_dict(), "val_acc": v_acc},
+                {
+                    **meta,
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "val_acc": v_acc,
+                },
                 best_path,
             )
 
@@ -137,6 +148,7 @@ def fit(
             path = os.path.join(checkpoint_dir, f"stgcn_baseline_epoch_{epoch}.pt")
             torch.save(
                 {
+                    **meta,
                     "epoch": epoch,
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
@@ -241,6 +253,7 @@ def train_model(config_path="configs/baseline.yaml", device="auto", stream="join
         mixup_alpha=config["training"].get("mixup_alpha", 0.0),
         clip_grad=config["training"].get("clip_grad", 1.0),
         warmup_epochs=config["training"].get("warmup_epochs", 0),
+        checkpoint_meta=checkpoint_meta(config, stream),
     )
     print(f"Training loop completed. Checkpoints in {checkpoint_dir}")
 

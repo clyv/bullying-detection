@@ -147,5 +147,8 @@ def _extent(kp, scores):
     if not visible.any():
         return 1.0
     coords = kp[visible]
-    spread = float(coords.max(axis=0).max() - coords.min(axis=0).min())
+    # Largest *per-axis* span. Taking max-of-all minus min-of-all instead mixes the
+    # axes: a person at x~1500, y~300 then measured ~1200px however small they were,
+    # and coord_noise came out up to 7.6x too strong on the far-away CCTV subjects.
+    spread = float((coords.max(axis=0) - coords.min(axis=0)).max())
     return max(spread, 1.0)

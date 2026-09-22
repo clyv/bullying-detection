@@ -13,7 +13,7 @@ unit-testable without a GPU; only score_stream needs torch + a checkpoint.
 
 Usage:
     python -m src.evaluation.localize --stream outputs/cctv_poses/clip.npz \\
-        --checkpoint outputs/checkpoints/stgcn_baseline_epoch_40.pt --config configs/unified.yaml
+        --checkpoint outputs/checkpoints/phase4_unified/agcn_best.pt --config configs/unified.yaml
 """
 
 from __future__ import annotations
@@ -240,7 +240,7 @@ def run(stream_path, checkpoint, config_path="configs/unified.yaml", fps=30.0):
     import torch
     import yaml
 
-    from src.models.stgcn import STGCNBaseline
+    from src.models.factory import load_for_inference
 
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
@@ -251,17 +251,11 @@ def run(stream_path, checkpoint, config_path="configs/unified.yaml", fps=30.0):
     max_gap = loc.get("max_gap", 0)
     crowd_aware = loc.get("crowd_aware", True)
     max_pairs = loc.get("max_pairs", 24)
-    normalize = cfg["data"].get("normalize", False)  # must match training
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = STGCNBaseline(
-        in_channels=cfg["model"]["in_channels"],
-        num_classes=2,
-        num_persons=cfg["data"]["max_persons"],
-        graph_strategy="spatial",
-    ).to(device)
-    state = torch.load(checkpoint, map_location=device, weights_only=False)
-    model.load_state_dict(state.get("model_state_dict", state))
+    # Architecture and normalization both come from the checkpoint, so this must
+    # match how the model was trained even when the config has since moved on.
+    model, normalize = load_for_inference(checkpoint, cfg, device)
 
     with np.load(stream_path) as data:
         incidents = localize_stream(

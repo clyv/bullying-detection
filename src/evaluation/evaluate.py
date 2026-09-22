@@ -155,7 +155,7 @@ def evaluate(
         format_calibration,
         softmax,
     )
-    from src.models.factory import build_model, checkpoint_name
+    from src.models.factory import checkpoint_name, load_for_inference
 
     pose_cache = config["data"]["pose_cache"]
     num_classes = config["model"]["num_classes"]
@@ -197,10 +197,10 @@ def evaluate(
         if device == "auto"
         else torch.device(device)
     )
-    model = build_model(config).to(torch_device)
-    state = torch.load(checkpoint, map_location=torch_device, weights_only=False)
-    model.load_state_dict(state.get("model_state_dict", state))
-    model.eval()
+    model, normalize = load_for_inference(checkpoint, config, torch_device, num_classes)
+    # Every Subset below references this one dataset, so this re-points them all at
+    # the normalization the checkpoint was trained with.
+    dataset.normalize = normalize
     device = torch_device
     print(f"Loaded checkpoint: {checkpoint}  (device={device}, stream={stream})")
     print(f"Evaluating on '{split}' split: n={len(subset)}")

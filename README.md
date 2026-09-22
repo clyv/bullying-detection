@@ -166,7 +166,7 @@ timestamps) to flag for human review.
 
 ```
 python -m src.evaluation.localize --stream outputs/cctv_poses/clip.npz \
-    --checkpoint outputs/checkpoints/stgcn_baseline_epoch_40.pt --config configs/unified.yaml
+    --checkpoint outputs/checkpoints/phase4_unified/agcn_best.pt --config configs/unified.yaml
 ```
 
 The preprocessing, metrics, and temporal-localization logic is unit-tested

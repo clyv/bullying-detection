@@ -108,6 +108,22 @@ def test_agcn_forward_shape():
     assert out.shape == (2, 2)
 
 
+def test_agcn_does_not_start_saturated():
+    # Regression: a head init of std sqrt(2 / num_classes) — tuned in 2s-AGCN for 60
+    # classes — is std 1.0 for binary, so 64% of real clips scored P > 0.99 before
+    # the first step and the pooled run sat at chance. A fresh model must be unsure.
+    torch.manual_seed(0)
+    x = torch.randn(32, 3, 64, 17, 2)
+    x[:, 2] = torch.rand(32, 64, 17, 2)  # confidence channel
+    for num_classes in (2, 6):
+        model = AGCN(in_channels=3, num_classes=num_classes)
+        model.train()  # step 1 runs with batch-stat BN
+        with torch.no_grad():
+            probs = torch.softmax(model(x), dim=1)
+        saturated = (probs.max(dim=1).values > 0.99).float().mean().item()
+        assert saturated < 0.05, f"{num_classes} classes: {saturated:.0%} saturated at init"
+
+
 def test_agcn_handles_odd_frame_counts_and_single_person():
     model = AGCN(in_channels=3, num_classes=2, num_persons=1)
     model.eval()
@@ -197,6 +213,76 @@ def test_checkpoint_names_are_unique_per_model_and_stream():
     }
     assert len(names) == 8  # nothing overwrites anything else
     assert checkpoint_name(_config("stgcn"), "joint") == "stgcn_best.pt"  # back-compat
+
+
+def test_load_for_inference_reads_architecture_from_an_old_checkpoint(tmp_path):
+    # A pre-metadata file (the 16 Sep phase4 stgcn_best.pt shape) must still load as
+    # ST-GCN — and with the legacy normalization it was trained on — even though the
+    # config now says agcn and normalize: true.
+    from src.models.factory import load_for_inference
+    from src.models.stgcn import STGCNBaseline
+
+    path = tmp_path / "stgcn_best.pt"
+    torch.save({"model_state_dict": STGCNBaseline(3, 2).state_dict()}, path)
+    config = {**_config("agcn"), "data": {"max_persons": 2, "normalize": True}}
+    model, normalize = load_for_inference(str(path), config, torch.device("cpu"))
+    assert isinstance(model, STGCNBaseline)
+    assert normalize == "legacy"
+    assert not model.training
+
+
+def test_load_for_inference_honours_recorded_metadata(tmp_path):
+    from src.models.factory import checkpoint_meta, load_for_inference
+
+    config = {**_config("agcn"), "data": {"max_persons": 2, "normalize": True}}
+    path = tmp_path / "agcn_best.pt"
+    torch.save({**checkpoint_meta(config), "model_state_dict": AGCN(3, 2).state_dict()}, path)
+    # Even under a config that has since switched back to stgcn, the file wins.
+    later = {**_config("stgcn"), "data": {"max_persons": 2, "normalize": False}}
+    model, normalize = load_for_inference(str(path), later, torch.device("cpu"))
+    assert isinstance(model, AGCN)
+    assert normalize is True
+
+
+def test_infer_architecture_rejects_unknown_weights():
+    from src.models.factory import infer_architecture
+
+    try:
+        infer_architecture({"encoder.weight": torch.zeros(1)})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for an unrecognised state dict")
+
+
+def test_fit_records_checkpoint_metadata(tmp_path):
+    # The metadata is what lets visualize.py load an agcn checkpoint at all, so the
+    # training loop itself must write it — not just the helpers that describe it.
+    from torch.utils.data import DataLoader, TensorDataset
+
+    from src.models.factory import checkpoint_meta
+    from src.training.train import fit
+
+    torch.manual_seed(0)
+    data = TensorDataset(torch.randn(8, 3, 16, 17, 2), torch.tensor([0, 1] * 4))
+    loader = DataLoader(data, batch_size=4)
+    config = {**_config("agcn"), "data": {"max_persons": 2, "normalize": True}}
+    best = tmp_path / "agcn_best.pt"
+    fit(
+        AGCN(3, 2, base_channels=8),
+        loader,
+        loader,
+        epochs=1,
+        lr=1e-3,
+        weight_decay=0.0,
+        device=torch.device("cpu"),
+        best_path=str(best),
+        checkpoint_meta=checkpoint_meta(config),
+    )
+    saved = torch.load(best, weights_only=False)
+    assert saved["model"] == "agcn"
+    assert saved["normalize"] is True
+    assert saved["stream"] == "joint"
 
 
 # --- ensemble ---------------------------------------------------------------

@@ -87,6 +87,10 @@ def test_cross_dataset_end_to_end(tmp_path):
     assert pooled is not None
     acc, cm = pooled
     assert cm.shape == (2, 2)
+    # The pooled checkpoint must land in this test's temp dir (conftest chdirs there),
+    # never in the repo's real outputs/ — where it used to overwrite the user's model.
+    written = tmp_path / "outputs" / "checkpoints" / "phase4_unified" / "stgcn_best.pt"
+    assert written.exists()
 
     loo = leave_one_out(cfg, device)
     assert set(loo) == {"ds_a", "ds_b"}
