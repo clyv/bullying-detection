@@ -83,12 +83,19 @@ def fit(
     clip_grad=1.0,
     warmup_epochs=0,
     checkpoint_meta=None,
+    restore_best=True,
 ):
     """Train ``model`` in place and return it. Shared by train.py and cross-dataset eval.
 
     If ``best_path`` is given, the checkpoint with the highest validation accuracy
     seen so far is (re)saved there each time it improves — so evaluation can use
     the best-generalizing weights rather than the (overfit) final epoch.
+
+    With ``restore_best`` (default) the returned model carries those best-validation
+    weights, not the last epoch's — with or without ``best_path``. Otherwise a caller
+    that tests the returned model reports a different model from the one on disk
+    (87.64% printed vs 88.21% saved, on one run), and leave-one-dataset-out folds,
+    which save nothing, would ignore their validation split entirely.
 
     ``checkpoint_meta`` (see models.factory.checkpoint_meta) is written into every
     saved file so inference tools can rebuild the right architecture and feed it
@@ -101,6 +108,8 @@ def fit(
     if checkpoint_dir:
         os.makedirs(checkpoint_dir, exist_ok=True)
     best_acc = -1.0
+    best_state = None
+    best_epoch = 0
 
     for epoch in range(1, epochs + 1):
         model.train()
@@ -132,17 +141,22 @@ def fit(
             f"| Val Loss: {v_loss:.4f} Acc: {v_acc:.2f}%"
         )
 
-        if best_path and v_acc > best_acc:
-            best_acc = v_acc
-            torch.save(
-                {
-                    **meta,
-                    "epoch": epoch,
-                    "model_state_dict": model.state_dict(),
-                    "val_acc": v_acc,
-                },
-                best_path,
-            )
+        if v_acc > best_acc:
+            best_acc, best_epoch = v_acc, epoch
+            if restore_best:
+                # Detached copies: state_dict() returns live references that the
+                # next optimizer step would overwrite.
+                best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+            if best_path:
+                torch.save(
+                    {
+                        **meta,
+                        "epoch": epoch,
+                        "model_state_dict": model.state_dict(),
+                        "val_acc": v_acc,
+                    },
+                    best_path,
+                )
 
         if checkpoint_dir and (epoch % 10 == 0 or epoch == epochs):
             path = os.path.join(checkpoint_dir, f"stgcn_baseline_epoch_{epoch}.pt")
@@ -159,6 +173,9 @@ def fit(
             print(f"[checkpoint] saved to {path}")
     if best_path and best_acc >= 0:
         print(f"[checkpoint] best val acc {best_acc:.2f}% -> {best_path}")
+    if restore_best and best_state is not None:
+        model.load_state_dict(best_state)
+        print(f"[fit] restored best-validation weights (epoch {best_epoch}, {best_acc:.2f}%)")
     return model
 
 

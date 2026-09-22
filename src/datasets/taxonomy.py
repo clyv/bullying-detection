@@ -4,11 +4,17 @@ Each source dataset has its own action taxonomy that doesn't line up with the
 others, so the unified model collapses them onto the binary axis the project is
 actually about: aggressive (physical/confrontational) vs. neutral interaction.
 
-The mapping is deliberately explicit and auditable here. Some assignments are
-judgement calls — NTU's "subtle" bullying-relevant actions (point, follow,
-whisper, shake fist) are treated as aggressive because they are exactly the kind
-of confrontational behaviour the system is meant to flag; revisit if you want a
-stricter physical-only definition.
+The mapping is deliberately explicit and auditable. Some assignments are judgement
+calls. NTU's aggressive set is physical contact only (ntu_skeleton.AGGRESSIVE:
+punch/slap, kick, push, hit with object, wield knife, knock over, grab, step on
+foot); its "subtle" confrontational actions — point finger, shake fist, follow,
+whisper — are stored as **neutral**, consistent with UT-Interaction's "point".
+Moving them to aggressive would flag intimidation too, at the cost of a class
+defined by intent rather than by anything a skeleton shows.
+
+NTU's actors mime their violence. Its aggressive clips move only ~1.14x faster than
+its neutral ones (1.8-2.3x in the other corpora), which is why a model trained
+elsewhere — where aggression looks like fast movement — misses most of them.
 """
 
 from __future__ import annotations

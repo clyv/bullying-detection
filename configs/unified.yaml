@@ -47,6 +47,9 @@ training:
   warmup_epochs: 3       # the adaptive adjacency is unstable at full LR from step 0
   clip_grad: 1.0
   mixup_alpha: 0.0       # >0 enables skeleton mixup (disables focal loss that epoch)
+  # Corpus-balanced sampling (src/training/sampling.py): 0 = natural mix, where real
+  # CCTV is ~7% of every batch; 0.5 = sqrt-tempered; 1 = every corpus equal.
+  dataset_balance: 0.0
 
 # Training-split-only augmentation. Chosen against measured failure modes rather
 # than generically: joint_dropout simulates the missing keypoints YOLO-Pose returns
