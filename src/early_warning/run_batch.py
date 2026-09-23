@@ -139,6 +139,10 @@ def score_video(
         mean_quality=round(float(quality.mean()), 3),
         peak_5s=round(float(h5.max()), 3),
         peak_10s=round(float(h10.max()), 3),
+        # Share of the clip already above WARN. A long lead time on a video whose
+        # hazard is high throughout is not anticipation, it is a light left on,
+        # and the peak alone cannot tell the two apart.
+        frac_above_warn=round(float((h5 >= cfg.warn_enter).mean()), 3),
         # None = nobody has said what is in this video. Only True/False count.
         has_assault=None if labelled is None else onset is not None,
         assault_spans_s=[[round(a / fps, 1), round(b / fps, 1)] for a, b in spans],
@@ -161,6 +165,12 @@ def score_video(
     trigger = first_alarm_frame(h10, cfg.watch_enter, end=onset)
     row["reasons_at_alarm"] = top_reasons(bundle.signals, trigger) if trigger is not None else {}
     return row
+
+
+def _median_frac(rows: list[dict]) -> float | None:
+    """Median share of a clip spent above WARN, over the rows that recorded it."""
+    vals = [r["frac_above_warn"] for r in rows if r.get("frac_above_warn") is not None]
+    return round(float(np.median(vals)), 3) if vals else None
 
 
 def _crossing_s(series, threshold: float, fps: float) -> float | None:
@@ -192,9 +202,25 @@ def aggregate(rows: list[dict], out_dir: Path, budget_per_hour: float, cfg: Poli
         with_assault=len(pos),
         without_assault=len(neg),
         unlabelled=unlabelled,
-        negative_hours=round(sum(len(s) for s in neg) / fps / 3600.0, 3),
+        # len() over neg_scores (the arrays), not neg (the ledger rows) -- the
+        # latter silently measures how many columns a row has.
+        negative_hours=round(sum(len(s) for s in neg_scores) / fps / 3600.0, 3),
+        # The smallest rate this much footage could even resolve. A budget of
+        # 0.15/h cannot be verified on ten minutes of video, and a threshold
+        # chosen against it is fitted to noise.
+        resolvable_per_hour=round(1.0 / (sum(len(s) for s in neg_scores) / fps / 3600.0), 1)
+        if neg_scores
+        else None,
         warn_lead_s=lead_time_distribution(leads),
         anticipated=int((leads >= 1.0).sum()),
+        # If these are near 1, the lead times above are an artefact of a hazard
+        # that is always on, and no threshold will separate anything.
+        # .get: a ledger written by an older version has no such column, and a
+        # missing diagnostic should not take the whole summary down with it.
+        median_frac_above_warn=dict(
+            with_assault=_median_frac(pos),
+            without_assault=_median_frac(neg),
+        ),
         false_warn_per_hour=round(false_alarms_per_hour(neg_scores, cfg.warn_enter, fps), 2)
         if neg
         else None,
@@ -224,6 +250,12 @@ def shortlist(rows: list[dict], k: int = 15) -> list[dict]:
             lead_s=r["warn_lead_s"],
             onset_s=r["onset_s"],
             watch_at_s=round(r["onset_s"] - r["warn_lead_s"], 1),
+            # Close to 1 means the alarm covered most of the clip; treat the lead
+            # as unearned and check the footage before believing it.
+            lead_fraction=round(r["warn_lead_s"] / r["duration_s"], 2)
+            if r.get("duration_s")
+            else None,
+            frac_above_warn=r.get("frac_above_warn"),
             quality=r["mean_quality"],
             reasons=r.get("reasons_at_alarm", {}),
         )
@@ -384,6 +416,15 @@ def main() -> None:
             f"at least 1s early; lead p25/median/p75 "
             f"{dist['p25']:.1f}/{dist['median']:.1f}/{dist['p75']:.1f}s (max {dist['max']:.1f}s)"
         )
+    sat = summary.get("median_frac_above_warn") or {}
+    if sat.get("with_assault") is not None:
+        print(
+            f"  median share of each clip already above WARN: "
+            f"{sat['with_assault']:.0%} of assault videos, "
+            f"{sat['without_assault']:.0%} of quiet ones"
+            if sat.get("without_assault") is not None
+            else f"  median share already above WARN: {sat['with_assault']:.0%}"
+        )
     if summary.get("false_warn_per_hour") is not None:
         print(
             f"  on {summary['negative_hours']}h with no assault: "
@@ -396,6 +437,13 @@ def main() -> None:
             f"  at a {b['false_alarms_per_hour']}/h budget (threshold {b['threshold']:.2f}): "
             f"{b['recall']:.0%} anticipated, median lead {b['median_lead_s']:.1f}s"
         )
+        floor = summary.get("resolvable_per_hour")
+        if floor and floor > 0.15:
+            print(
+                f"  [!] {summary['negative_hours']}h of quiet footage can only resolve rates "
+                f"down to {floor}/h, so the budget threshold above is fitted to noise.\n"
+                f"      Score more negatives before believing any of it."
+            )
     print(f"\n  review queue: {len(summary['shortlist'])} in {Path(args.out) / 'summary.json'}")
     for item in summary["shortlist"][:5]:
         print(

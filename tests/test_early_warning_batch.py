@@ -34,7 +34,15 @@ def _scores(tmp_path, video_id, series):
 
 
 def _row(video_id, **kw):
-    base = dict(video_id=video_id, usable=True, fps=FPS, mean_quality=1.0, label_source="fight")
+    base = dict(
+        video_id=video_id,
+        usable=True,
+        fps=FPS,
+        mean_quality=1.0,
+        label_source="fight",
+        duration_s=20.0,
+        frac_above_warn=0.0,
+    )
     return base | kw
 
 
@@ -88,6 +96,30 @@ def test_unlabelled_videos_are_excluded_from_every_statistic(tmp_path):
     assert out["false_warn_per_hour"] == 0.0  # the unlabelled loud video is not counted
 
 
+def test_negative_hours_counts_frames_not_ledger_columns(tmp_path):
+    # The bug this guards: summing len() over the row dicts reported the number
+    # of columns as a duration, making 5+ minutes of footage look like 14 seconds.
+    _scores(tmp_path, "pos", np.ones(100))
+    _scores(tmp_path, "neg", np.zeros(36_000))  # exactly one hour at 10 fps
+    rows = [_row("pos", has_assault=True, onset_s=5.0), _row("neg", has_assault=False)]
+
+    out = aggregate(rows, tmp_path, 0.15, CFG)
+    assert out["negative_hours"] == 1.0
+    assert out["resolvable_per_hour"] == 1.0
+
+
+def test_aggregate_survives_a_ledger_written_before_a_column_existed(tmp_path):
+    _scores(tmp_path, "old", np.ones(50))
+    _scores(tmp_path, "quiet", np.zeros(50))
+    rows = [_row("old", has_assault=True, onset_s=4.0), _row("quiet", has_assault=False)]
+    for r in rows:
+        del r["frac_above_warn"]
+
+    out = aggregate(rows, tmp_path, 0.15, CFG)
+    assert out["median_frac_above_warn"] == {"with_assault": None, "without_assault": None}
+    assert out["with_assault"] == 1  # the rest of the summary still computes
+
+
 def test_aggregate_without_any_labels_reports_nothing_but_the_count(tmp_path):
     _scores(tmp_path, "a", np.ones(50))
     out = aggregate([_row("a", has_assault=None)], tmp_path, 0.15, CFG)
@@ -129,6 +161,18 @@ def test_shortlist_ranks_by_lead_and_skips_videos_that_never_fired():
     got = shortlist(rows)
     assert [r["video_id"] for r in got] == ["long", "short"]
     assert got[0]["watch_at_s"] == 22.0  # onset 30 minus an 8s lead
+
+
+def test_shortlist_exposes_how_much_of_the_clip_the_alarm_covered():
+    # An 18s lead on a 20s clip is a light left on, not a prediction, and the
+    # queue has to say so or a reviewer will read it as the best hit of the batch.
+    rows = [
+        _row("saturated", onset_s=19.0, warn_lead_s=18.0, duration_s=20.0, frac_above_warn=0.95),
+        _row("crisp", onset_s=19.0, warn_lead_s=3.0, duration_s=20.0, frac_above_warn=0.12),
+    ]
+    by_id = {r["video_id"]: r for r in shortlist(rows)}
+    assert by_id["saturated"]["lead_fraction"] == 0.9
+    assert by_id["crisp"]["lead_fraction"] == 0.15
 
 
 def test_case_template_is_marked_unreviewed_and_flags_its_guesses(tmp_path):

@@ -238,6 +238,22 @@ social-feature stack beats a coarse-geometry baseline by +0.118 on
 aggressive-minus-benign separation. Results and the four specific defects are in
 [§8.1 of the design doc](docs/EARLY_WARNING_DESIGN.md).
 
+To score a whole corpus rather than one clip — and to keep a ledger of what the
+system claimed, so a lucky hit cannot be mistaken for a result — use the batch
+runner, then follow the [playbook](docs/EARLY_WARNING_PLAYBOOK.md):
+
+```
+python -m src.early_warning.run_batch --videos data/ubi_fights/UBI_FIGHTS/videos \
+    --annotations data/ubi_fights/UBI_FIGHTS/annotation --out outputs/ew_batch --pattern "F_*"
+```
+
+It reports lead time beside false alarms per hour and anticipation-at-budget,
+and refuses to let a long lead stand unqualified: on 16 UBI-Fights videos, six
+of eight assaults had a pre-onset WARN with a median 24 s lead and zero false
+alarms on the quiet clips — but the median fight clip was already above WARN for
+27% of its length, and 5 minutes of quiet footage cannot resolve a false-alarm
+rate below ~11/hour. Both caveats are printed with the result.
+
 ## Roadmap
 
 - [x] **Phase 1 — Baseline:** pose-extraction pipeline (YOLO-Pose) + ST-GCN baseline (training & evaluation) on UT-Interaction / RWF-2000
