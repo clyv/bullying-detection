@@ -20,7 +20,10 @@ jobs:
       # Pinning ruff only here let a local copy drift to 0.15 and report a clean
       # tree while CI, on 0.16, found 36 errors in code nobody had touched.
       - run: pip install -r requirements-dev.txt
-      - run: pip install numpy pyyaml
+      # scikit-learn backs the WindowHazard baseline, which every learned
+      # anticipation model has to beat. Leaving it out skips the one test that
+      # checks the bar still works.
+      - run: pip install numpy pyyaml scikit-learn
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
       - run: ruff check .
       - run: ruff format --check .
