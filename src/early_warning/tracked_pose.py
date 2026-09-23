@@ -85,13 +85,20 @@ def extract(
     Frames are subsampled to `process_fps`: social signals do not need 30 fps,
     and the cost is linear in frames processed.
     """
+    import os
+
     import cv2
     from ultralytics import YOLO
+
+    # OpenCV returns the same "not opened" for a missing path and an undecodable
+    # file, which sends people hunting for a codec problem they don't have.
+    if not os.path.exists(video):
+        raise FileNotFoundError(f"no such video file: {video} (cwd {os.getcwd()})")
 
     model = YOLO(weights)
     capture = cv2.VideoCapture(str(video))
     if not capture.isOpened():
-        raise FileNotFoundError(f"could not open video: {video}")
+        raise OSError(f"found {video} but OpenCV could not decode it — unsupported codec?")
     src_fps = capture.get(cv2.CAP_PROP_FPS) or 30.0
     step = max(1, int(round(src_fps / max(process_fps, 1e-6))))
 
