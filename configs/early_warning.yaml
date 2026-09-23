@@ -1,0 +1,89 @@
+# Escalation early warning (anticipation). See docs/EARLY_WARNING_DESIGN.md.
+# Separate from the detection configs: nothing here changes how the assault
+# detector is trained or evaluated.
+#
+# Values marked "starting point" must be re-set from data: thresholds from the
+# false-alarm budget, model choices from leave-one-dataset-out results.
+
+pose:
+  weights: yolov8m-pose.pt
+  max_people: 12
+  tracker: bytetrack.yaml        # ultralytics tracker config; botsort.yaml is the alternative
+  process_fps: 10                # social signals do not need 30 fps
+
+features:                        # maps onto social_features.FeatureConfig
+  conf_thr: 0.3
+  near_radius: 1.5               # body heights
+  contact_thr: 0.15              # body heights, wrist to torso centre
+  min_move_speed: 0.25           # body heights per second
+  facing_thr: 0.5                # cosine
+  smooth_s: 0.3
+  height_smooth_s: 1.0
+  corner_window_s: 3.0
+  windows_s: [2, 5, 10]          # trailing windows for the Stage 0 baseline
+  min_height_px: 90              # below this, observation quality falls and the policy abstains
+
+labels:                          # maps onto anticipation_labels.make_window_labels
+  horizon_s: 10
+  bin_s: 1.0
+  report_horizons_s: [2, 5, 10]
+  stride_s: 0.5
+  onset_jitter_s: 0.5
+  min_context_s: 2.0
+
+datasets:
+  ut_interaction:
+    videos: data/ut_interaction              # seq1.avi ... seq20.avi
+    labels: data/ut_interaction/ut-interaction_labels_110912.xls
+    fps: 30
+  ubi_fights:
+    videos: data/ubi_fights/videos           # TODO: point at the full-length videos
+    annotations: data/ubi_fights/annotation  # TODO: per-frame label files
+    fps: 30
+  ntu_cctv_fights: null                      # to request
+  behave: null                               # to download
+  phase_annotations: data/annotations/phases # own JSON files (design doc, section 5)
+
+model:
+  # Order of escalation: geometry -> heuristic -> window_hazard -> escalation_net.
+  # Each rung must beat the one below it in leave-one-dataset-out, or it is dropped.
+  name: heuristic                # heuristic | geometry | window_hazard | escalation_net
+  window_hazard:
+    max_depth: 3
+    learning_rate: 0.06
+    max_iter: 300
+  escalation_net:
+    d: 64
+    heads: 4
+    layers: 2
+    dropout: 0.1
+
+train:
+  lr: 0.001
+  weight_decay: 0.01
+  epochs: 30
+  batch_size: 16
+  seq_len_s: 20
+  neg_to_pos_windows: 3          # starting point
+  loss_weights: {hazard: 1.0, assault: 0.5, phase: 0.3}
+  distill: {enabled: false, teacher_future_s: 5.0, temperature: 2.0, weight: 0.5}
+
+policy:                          # starting points only; calibrate per camera
+  watch_enter: 0.35
+  watch_exit: 0.25
+  warn_enter: 0.55
+  warn_exit: 0.40
+  incident_enter: 0.80
+  incident_exit: 0.50
+  enter_dwell_s: 1.0
+  exit_dwell_s: 4.0
+  cooldown_s: 30.0
+  min_quality: 0.35              # below this, anticipation is capped at WATCH
+  quality_caps_incident: false   # the assault detector has its own abstention
+
+evaluation:
+  protocol: lodo
+  warn_budget_per_camera_hour: 0.15   # about 1 false WARN per camera per school day
+  watch_budget_per_camera_hour: 2.0
+  min_lead_s: 1.0
+  baselines: [geometry, motion_energy, min_pair_distance, largest_group, agcn_assault_score]

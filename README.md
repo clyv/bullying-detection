@@ -200,6 +200,29 @@ The preprocessing, metrics, and temporal-localization logic is unit-tested
 evaluation, and stream-localization paths are covered too. The same checks run in
 CI on every push.
 
+## Early warning (separate track)
+
+Everything above **detects an assault once it is happening**. `src/early_warning/`
+is a separate, self-contained attempt at the harder question — *is one about to
+start?* — split into precursor, build-up and assault. It shares no code with the
+detection pipeline in either direction, so the two can be broken and evaluated
+independently. Design and evidence: [docs/EARLY_WARNING_DESIGN.md](docs/EARLY_WARNING_DESIGN.md).
+
+It runs with no labels and no trained model, because the default hazard is an
+interpretable heuristic over social signals (encirclement, cornering, closing
+speed, squaring up, shove):
+
+```
+python -m src.early_warning.tracked_pose --video hall.mp4 --output hall.npz
+python -m src.early_warning.replay --poses hall.npz --output hall_timeline.json
+```
+
+Scores are uncalibrated by design: thresholds come from a false-alarm budget on
+a camera's own normal footage, not from a number picked in advance. Alerts are
+tiered by what a human is asked to do — WATCH highlights a camera and notifies
+nobody, WARN asks someone to go and supervise — because the criminology is clear
+that most confrontations never become violent.
+
 ## Roadmap
 
 - [x] **Phase 1 — Baseline:** pose-extraction pipeline (YOLO-Pose) + ST-GCN baseline (training & evaluation) on UT-Interaction / RWF-2000
