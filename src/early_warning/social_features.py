@@ -215,7 +215,7 @@ def person_geometry(kp: np.ndarray, sc: np.ndarray, cfg: FeatureConfig) -> Perso
 
 def pairwise_features(g: PersonGeometry, cfg: FeatureConfig) -> dict:
     """(T, M, M) arrays; entry [t, i, j] describes person i relative to person j."""
-    T, M = g.valid.shape
+    M = g.valid.shape[1]
     k = max(1, round(cfg.smooth_s * cfg.fps))
     both = g.valid[:, :, None] & g.valid[:, None, :] & ~np.eye(M, dtype=bool)[None]
     vec = g.foot[:, None, :, :] - g.foot[:, :, None, :]  # [t, i, j] = foot_j - foot_i
@@ -237,18 +237,18 @@ def pairwise_features(g: PersonGeometry, cfg: FeatureConfig) -> dict:
     def masked(x: np.ndarray) -> np.ndarray:
         return np.where(both, np.nan_to_num(x), 0.0)
 
-    return dict(
-        both=both,
-        dist=dist,
-        closing=masked(closing),
-        advance=masked(advance),
-        recoil=masked(recoil),
-        facing=masked(facing),
-        mutual_facing=masked(mutual),
-        reach=np.where(both, reach, np.nan),
-        contact=contact,
-        shove=shove,
-    )
+    return {
+        "both": both,
+        "dist": dist,
+        "closing": masked(closing),
+        "advance": masked(advance),
+        "recoil": masked(recoil),
+        "facing": masked(facing),
+        "mutual_facing": masked(mutual),
+        "reach": np.where(both, reach, np.nan),
+        "contact": contact,
+        "shove": shove,
+    }
 
 
 # ---------------------------------------------------------------- per target
@@ -291,14 +291,14 @@ def target_features(g: PersonGeometry, pw: dict, cfg: FeatureConfig) -> dict:
     cornered = np.clip(past / cfg.min_move_speed, 0.0, 1.0) * stalled * (pressure > 0.05)
 
     v = g.valid.astype(float)
-    return dict(
-        n_near=n_near * v,
-        n_facing=n_facing * v,
-        coverage=coverage * v,
-        enclosure=enclosure * v,
-        cornered=cornered * v,
-        retreat=retreat * v,
-    )
+    return {
+        "n_near": n_near * v,
+        "n_facing": n_facing * v,
+        "coverage": coverage * v,
+        "enclosure": enclosure * v,
+        "cornered": cornered * v,
+        "retreat": retreat * v,
+    }
 
 
 # -------------------------------------------------------------------- scene
@@ -358,13 +358,13 @@ def scene_features(g: PersonGeometry, pw: dict, cfg: FeatureConfig) -> dict:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
         kinetic = np.nan_to_num(np.nanmean(speed2, axis=1))
-    return dict(
-        n_people=g.valid.sum(1).astype(float),
-        largest_group=largest,
-        converging=converging,
-        ring_still=ring,
-        kinetic=kinetic,
-    )
+    return {
+        "n_people": g.valid.sum(1).astype(float),
+        "largest_group": largest,
+        "converging": converging,
+        "ring_still": ring,
+        "kinetic": kinetic,
+    }
 
 
 # ------------------------------------------------------------------ public API
@@ -450,9 +450,9 @@ def to_model_inputs(b: FeatureBundle) -> dict:
         if k in ("dist", "reach"):
             x = np.clip(np.nan_to_num(x, nan=5.0), 0.0, 5.0)
         edges.append(x)
-    return dict(
-        person=np.nan_to_num(person).astype(np.float32),
-        edge=np.nan_to_num(np.stack(edges, -1)).astype(np.float32),
-        scene=np.stack([b.scene[k] for k in SCENE_KEYS], -1).astype(np.float32),
-        mask=g.valid,
-    )
+    return {
+        "person": np.nan_to_num(person).astype(np.float32),
+        "edge": np.nan_to_num(np.stack(edges, -1)).astype(np.float32),
+        "scene": np.stack([b.scene[k] for k in SCENE_KEYS], -1).astype(np.float32),
+        "mask": g.valid,
+    }

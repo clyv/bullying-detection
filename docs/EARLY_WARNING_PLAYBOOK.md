@@ -128,6 +128,7 @@ Corrected stubs load straight back:
 
 ```python
 from src.early_warning.anticipation_labels import load_phase_annotation
+
 ev = load_phase_annotation("outputs/ew_batch/cases/F_0_1_0_0_0.json")
 ```
 

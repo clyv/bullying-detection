@@ -81,9 +81,9 @@ def make_window_labels(
     min_context_s: float = 2.0,
 ) -> list[WindowLabel]:
     """One label per window end, every `stride_s`, after `min_context_s` of history."""
-    n_bins = int(round(horizon_s / bin_s))
-    stride = max(1, int(round(stride_s * ev.fps)))
-    start = int(round(min_context_s * ev.fps))
+    n_bins = round(horizon_s / bin_s)
+    stride = max(1, round(stride_s * ev.fps))
+    start = round(min_context_s * ev.fps)
     onsets = np.array(sorted(s for s, _ in ev.assault), dtype=np.int64)
     labels = []
     for t in range(start, ev.n_frames, stride):

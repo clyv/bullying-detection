@@ -96,18 +96,18 @@ def score_video(
         source_fps = float(d["source_fps"]) if "source_fps" in d else fps
         n_tracks = int(d["n_tracks"]) if "n_tracks" in d else -1
 
-    row = dict(
-        video=str(video),
-        video_id=video.stem,
-        label_source=video.parent.name,
-        fps=fps,
-        source_fps=source_fps,
-        steps=int(len(kp)),
-        duration_s=round(len(kp) / fps, 1) if fps else 0.0,
-        n_tracks=n_tracks,
-    )
+    row = {
+        "video": str(video),
+        "video_id": video.stem,
+        "label_source": video.parent.name,
+        "fps": fps,
+        "source_fps": source_fps,
+        "steps": len(kp),
+        "duration_s": round(len(kp) / fps, 1) if fps else 0.0,
+        "n_tracks": n_tracks,
+    }
     if len(kp) == 0:
-        return row | dict(usable=False, reason="no frames decoded")
+        return row | {"usable": False, "reason": "no frames decoded"}
 
     bundle = compute(kp, sc, FeatureConfig(fps=fps))
     quality = observation_quality(bundle.geometry)
@@ -134,19 +134,19 @@ def score_video(
         fps=np.float32(fps),
     )
 
-    row |= dict(
-        usable=True,
-        mean_quality=round(float(quality.mean()), 3),
-        peak_5s=round(float(h5.max()), 3),
-        peak_10s=round(float(h10.max()), 3),
+    row |= {
+        "usable": True,
+        "mean_quality": round(float(quality.mean()), 3),
+        "peak_5s": round(float(h5.max()), 3),
+        "peak_10s": round(float(h10.max()), 3),
         # Share of the clip already above WARN. A long lead time on a video whose
         # hazard is high throughout is not anticipation, it is a light left on,
         # and the peak alone cannot tell the two apart.
-        frac_above_warn=round(float((h5 >= cfg.warn_enter).mean()), 3),
+        "frac_above_warn": round(float((h5 >= cfg.warn_enter).mean()), 3),
         # None = nobody has said what is in this video. Only True/False count.
-        has_assault=None if labelled is None else onset is not None,
-        assault_spans_s=[[round(a / fps, 1), round(b / fps, 1)] for a, b in spans],
-    )
+        "has_assault": None if labelled is None else onset is not None,
+        "assault_spans_s": [[round(a / fps, 1), round(b / fps, 1)] for a, b in spans],
+    }
 
     if onset is None:
         # A video with no annotated assault is where false alarms are counted.
@@ -193,41 +193,41 @@ def aggregate(rows: list[dict], out_dir: Path, budget_per_hour: float, cfg: Poli
 
     fps = usable[0]["fps"]
     pos_scores = [series(r, "hazard_5s") for r in pos]
-    pos_onsets = [int(round(r["onset_s"] * fps)) for r in pos]
+    pos_onsets = [round(r["onset_s"] * fps) for r in pos]
     neg_scores = [series(r, "hazard_5s") for r in neg]
 
     leads = lead_times(pos_scores, pos_onsets, cfg.warn_enter, fps) if pos else np.array([])
-    out = dict(
-        videos=len(usable),
-        with_assault=len(pos),
-        without_assault=len(neg),
-        unlabelled=unlabelled,
+    out = {
+        "videos": len(usable),
+        "with_assault": len(pos),
+        "without_assault": len(neg),
+        "unlabelled": unlabelled,
         # len() over neg_scores (the arrays), not neg (the ledger rows) -- the
         # latter silently measures how many columns a row has.
-        negative_hours=round(sum(len(s) for s in neg_scores) / fps / 3600.0, 3),
+        "negative_hours": round(sum(len(s) for s in neg_scores) / fps / 3600.0, 3),
         # The smallest rate this much footage could even resolve. A budget of
         # 0.15/h cannot be verified on ten minutes of video, and a threshold
         # chosen against it is fitted to noise.
-        resolvable_per_hour=round(1.0 / (sum(len(s) for s in neg_scores) / fps / 3600.0), 1)
+        "resolvable_per_hour": round(1.0 / (sum(len(s) for s in neg_scores) / fps / 3600.0), 1)
         if neg_scores
         else None,
-        warn_lead_s=lead_time_distribution(leads),
-        anticipated=int((leads >= 1.0).sum()),
+        "warn_lead_s": lead_time_distribution(leads),
+        "anticipated": int((leads >= 1.0).sum()),
         # If these are near 1, the lead times above are an artefact of a hazard
         # that is always on, and no threshold will separate anything.
         # .get: a ledger written by an older version has no such column, and a
         # missing diagnostic should not take the whole summary down with it.
-        median_frac_above_warn=dict(
-            with_assault=_median_frac(pos),
-            without_assault=_median_frac(neg),
-        ),
-        false_warn_per_hour=round(false_alarms_per_hour(neg_scores, cfg.warn_enter, fps), 2)
+        "median_frac_above_warn": {
+            "with_assault": _median_frac(pos),
+            "without_assault": _median_frac(neg),
+        },
+        "false_warn_per_hour": round(false_alarms_per_hour(neg_scores, cfg.warn_enter, fps), 2)
         if neg
         else None,
-        false_watch_per_hour=round(false_alarms_per_hour(neg_scores, cfg.watch_enter, fps), 2)
+        "false_watch_per_hour": round(false_alarms_per_hour(neg_scores, cfg.watch_enter, fps), 2)
         if neg
         else None,
-    )
+    }
     if pos and neg:
         out["at_budget"] = anticipation_at_budget(
             pos_scores, pos_onsets, neg_scores, fps, budget_per_hour
@@ -245,20 +245,20 @@ def shortlist(rows: list[dict], k: int = 15) -> list[dict]:
     hits = [r for r in rows if r.get("warn_lead_s")]
     hits.sort(key=lambda r: r["warn_lead_s"], reverse=True)
     return [
-        dict(
-            video_id=r["video_id"],
-            lead_s=r["warn_lead_s"],
-            onset_s=r["onset_s"],
-            watch_at_s=round(r["onset_s"] - r["warn_lead_s"], 1),
+        {
+            "video_id": r["video_id"],
+            "lead_s": r["warn_lead_s"],
+            "onset_s": r["onset_s"],
+            "watch_at_s": round(r["onset_s"] - r["warn_lead_s"], 1),
             # Close to 1 means the alarm covered most of the clip; treat the lead
             # as unearned and check the footage before believing it.
-            lead_fraction=round(r["warn_lead_s"] / r["duration_s"], 2)
+            "lead_fraction": round(r["warn_lead_s"] / r["duration_s"], 2)
             if r.get("duration_s")
             else None,
-            frac_above_warn=r.get("frac_above_warn"),
-            quality=r["mean_quality"],
-            reasons=r.get("reasons_at_alarm", {}),
-        )
+            "frac_above_warn": r.get("frac_above_warn"),
+            "quality": r["mean_quality"],
+            "reasons": r.get("reasons_at_alarm", {}),
+        }
         for r in hits[:k]
     ]
 
@@ -344,8 +344,16 @@ def run(
                 continue
             try:
                 row = score_video(video, out, annotation_dir, process_fps, max_people, cfg)
-            except Exception as exc:  # one bad file must not lose the batch
-                row = dict(video=str(video), video_id=video.stem, usable=False, reason=str(exc))
+            # Deliberately blind: a batch is hours long and unattended, and one
+            # corrupt file must not discard the videos already scored. The failure
+            # is recorded in the ledger rather than swallowed.
+            except Exception as exc:  # noqa: BLE001
+                row = {
+                    "video": str(video),
+                    "video_id": video.stem,
+                    "usable": False,
+                    "reason": str(exc),
+                }
             f.write(json.dumps(row) + "\n")
             f.flush()
             rows.append(row)

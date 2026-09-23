@@ -57,17 +57,17 @@ def score_timeline(
         )
         alert = policy.update(s)
         timeline.append(
-            dict(
-                t_s=round(s.t_s, 3),
-                tier=policy.tier.name,
-                hazard_5s=round(s.hazard_5s, 4),
-                hazard_10s=round(s.hazard_10s, 4),
-                quality=round(s.quality, 3),
-                changed=alert is not None,
-                notify=bool(alert and alert.notify),
-                gated=bool(alert and alert.gated),
-                reasons=s.reasons,
-            )
+            {
+                "t_s": round(s.t_s, 3),
+                "tier": policy.tier.name,
+                "hazard_5s": round(s.hazard_5s, 4),
+                "hazard_10s": round(s.hazard_10s, 4),
+                "quality": round(s.quality, 3),
+                "changed": alert is not None,
+                "notify": bool(alert and alert.notify),
+                "gated": bool(alert and alert.gated),
+                "reasons": s.reasons,
+            }
         )
     return timeline
 
@@ -114,7 +114,7 @@ def run(
 
     if scorer == "geometry":
         base = geometry_hazard(bundle.signals, fps)
-        hazard = dict(hazard_5s=base, hazard_10s=base, precursor=base, buildup=base * 0.0)
+        hazard = {"hazard_5s": base, "hazard_10s": base, "precursor": base, "buildup": base * 0.0}
     else:
         hazard = HeuristicHazard(fps=fps)(bundle.signals)
 

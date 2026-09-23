@@ -34,15 +34,15 @@ def _scores(tmp_path, video_id, series):
 
 
 def _row(video_id, **kw):
-    base = dict(
-        video_id=video_id,
-        usable=True,
-        fps=FPS,
-        mean_quality=1.0,
-        label_source="fight",
-        duration_s=20.0,
-        frac_above_warn=0.0,
-    )
+    base = {
+        "video_id": video_id,
+        "usable": True,
+        "fps": FPS,
+        "mean_quality": 1.0,
+        "label_source": "fight",
+        "duration_s": 20.0,
+        "frac_above_warn": 0.0,
+    }
     return base | kw
 
 

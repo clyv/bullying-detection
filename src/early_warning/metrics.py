@@ -49,12 +49,12 @@ def anticipation_curve(
         tp = int((leads > 0).sum())
         fp = sum(first_alarm_frame(s, p) is not None for s in neg_scores)
         rows.append(
-            dict(
-                threshold=float(p),
-                precision=tp / (tp + fp) if tp + fp else 1.0,
-                recall=tp / max(len(leads), 1),
-                tta=float(leads[leads > 0].mean()) if tp else 0.0,
-            )
+            {
+                "threshold": float(p),
+                "precision": tp / (tp + fp) if tp + fp else 1.0,
+                "recall": tp / max(len(leads), 1),
+                "tta": float(leads[leads > 0].mean()) if tp else 0.0,
+            }
         )
     return rows
 
@@ -68,11 +68,11 @@ def summarize(rows: list[dict]) -> dict:
         ap += (r["recall"] - prev) * r["precision"]
         prev = r["recall"]
     hit = [r for r in rows if r["recall"] >= 0.8]
-    return dict(
-        ap=float(ap),
-        mtta=float(np.mean([r["tta"] for r in rows])) if rows else 0.0,
-        tta_at_r80=max(hit, key=lambda r: r["threshold"])["tta"] if hit else 0.0,
-    )
+    return {
+        "ap": float(ap),
+        "mtta": float(np.mean([r["tta"] for r in rows])) if rows else 0.0,
+        "tta_at_r80": max(hit, key=lambda r: r["threshold"])["tta"] if hit else 0.0,
+    }
 
 
 def alarm_episodes(
@@ -127,12 +127,12 @@ def anticipation_at_budget(
     thr = threshold_for_budget(neg_scores, fps, budget_per_hour, grid)
     leads = lead_times(pos_scores, pos_onsets, thr, fps)
     hit = leads >= min_lead_s
-    return dict(
-        threshold=thr,
-        recall=float(hit.mean()) if leads.size else 0.0,
-        median_lead_s=float(np.median(leads[hit])) if hit.any() else 0.0,
-        false_alarms_per_hour=false_alarms_per_hour(neg_scores, thr, fps),
-    )
+    return {
+        "threshold": thr,
+        "recall": float(hit.mean()) if leads.size else 0.0,
+        "median_lead_s": float(np.median(leads[hit])) if hit.any() else 0.0,
+        "false_alarms_per_hour": false_alarms_per_hour(neg_scores, thr, fps),
+    }
 
 
 def lead_time_distribution(leads) -> dict:
@@ -143,11 +143,11 @@ def lead_time_distribution(leads) -> dict:
     """
     leads = np.asarray([x for x in leads if x > 0], dtype=np.float64)
     if leads.size == 0:
-        return dict(n=0, p25=0.0, median=0.0, p75=0.0, max=0.0)
-    return dict(
-        n=int(leads.size),
-        p25=float(np.percentile(leads, 25)),
-        median=float(np.median(leads)),
-        p75=float(np.percentile(leads, 75)),
-        max=float(leads.max()),
-    )
+        return {"n": 0, "p25": 0.0, "median": 0.0, "p75": 0.0, "max": 0.0}
+    return {
+        "n": int(leads.size),
+        "p25": float(np.percentile(leads, 25)),
+        "median": float(np.median(leads)),
+        "p75": float(np.percentile(leads, 75)),
+        "max": float(leads.max()),
+    }

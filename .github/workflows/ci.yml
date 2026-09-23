@@ -15,9 +15,12 @@ jobs:
           python-version: "3.12"
       # CPU-only torch keeps CI GPU-free and fast; ultralytics is still imported
       # lazily in the source so it never needs installing here.
-      # ruff is pinned: it adds lint rules to its default set between releases, so
-      # an unpinned install turns an unrelated push red for reasons nobody changed.
-      - run: pip install numpy ruff==0.16.7 pytest pyyaml
+      # Linters come from requirements-dev.txt so that a developer running
+      # `pip install -r requirements-dev.txt` gets byte-identical versions.
+      # Pinning ruff only here let a local copy drift to 0.15 and report a clean
+      # tree while CI, on 0.16, found 36 errors in code nobody had touched.
+      - run: pip install -r requirements-dev.txt
+      - run: pip install numpy pyyaml
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
       - run: ruff check .
       - run: ruff format --check .

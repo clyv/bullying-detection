@@ -86,17 +86,17 @@ def evaluate(
         h10 = float(hazard["hazard_10s"][a : b + 1].max())
         tier = "WARN" if h5 >= cfg.warn_enter else ("WATCH" if h10 >= cfg.watch_enter else "CALM")
         rows.append(
-            dict(
-                cls=cls,
-                name=name,
-                aggressive=cls in AGGRESSIVE,
-                start_s=round(a / fps, 1),
-                end_s=round(b / fps, 1),
-                peak_5s=round(h5, 3),
-                peak_10s=round(h10, 3),
-                quality=round(float(quality[a : b + 1].mean()), 2),
-                tier=tier,
-            )
+            {
+                "cls": cls,
+                "name": name,
+                "aggressive": cls in AGGRESSIVE,
+                "start_s": round(a / fps, 1),
+                "end_s": round(b / fps, 1),
+                "peak_5s": round(h5, 3),
+                "peak_10s": round(h10, 3),
+                "quality": round(float(quality[a : b + 1].mean()), 2),
+                "tier": tier,
+            }
         )
 
     # Background: everything outside an interaction and its run-up. A hazard that
@@ -130,15 +130,15 @@ def evaluate(
     ben = np.array([r["peak_10s"] for r in rows if not r["aggressive"]])
     base = geometry_hazard(bundle.signals, fps)
 
-    return dict(
-        source=poses_path,
-        fps=fps,
-        steps=n,
-        duration_s=round(n / fps, 1),
-        mean_quality=round(float(quality.mean()), 2),
-        events=rows,
-        separation=round(float(agg.mean() - ben.mean()), 3) if agg.size and ben.size else 0.0,
-        geometry_separation=round(
+    return {
+        "source": poses_path,
+        "fps": fps,
+        "steps": n,
+        "duration_s": round(n / fps, 1),
+        "mean_quality": round(float(quality.mean()), 2),
+        "events": rows,
+        "separation": round(float(agg.mean() - ben.mean()), 3) if agg.size and ben.size else 0.0,
+        "geometry_separation": round(
             float(
                 np.mean([base[a : b + 1].max() for c, _, a, b in windows if c in AGGRESSIVE])
                 - np.mean([base[a : b + 1].max() for c, _, a, b in windows if c not in AGGRESSIVE])
@@ -147,18 +147,22 @@ def evaluate(
         )
         if agg.size and ben.size
         else 0.0,
-        leads=leads,
-        background_s=round(float(bg.sum() / fps), 1),
-        background_peak=round(float(hazard["hazard_10s"][bg].max()) if bg.any() else 0.0, 3),
-        false_watch_per_hour=round(len(episodes) / bg_hours, 1) if bg_hours > 0 else 0.0,
-    )
+        "leads": leads,
+        "background_s": round(float(bg.sum() / fps), 1),
+        "background_peak": round(float(hazard["hazard_10s"][bg].max()) if bg.any() else 0.0, 3),
+        "false_watch_per_hour": round(len(episodes) / bg_hours, 1) if bg_hours > 0 else 0.0,
+    }
 
 
 def report(result: dict) -> str:
     """The table worth pasting into the design doc."""
+    # Parenthesised: inside a list, two adjacent strings concatenate silently, so
+    # a dropped comma would merge two rows instead of raising anything.
     lines = [
-        f"{result['source']}: {result['steps']} steps @ {result['fps']:.0f} fps "
-        f"= {result['duration_s']}s, mean pose quality {result['mean_quality']}",
+        (
+            f"{result['source']}: {result['steps']} steps @ {result['fps']:.0f} fps "
+            f"= {result['duration_s']}s, mean pose quality {result['mean_quality']}"
+        ),
         "",
         f"{'interaction':<20}{'window':>15}{'peak 5s':>10}{'peak 10s':>10}{'qual':>7}  tier",
         "-" * 68,
@@ -171,10 +175,14 @@ def report(result: dict) -> str:
         )
     lines += [
         "",
-        f"aggressive minus benign peak: {result['separation']:+.3f} "
-        f"(coarse-geometry baseline {result['geometry_separation']:+.3f})",
-        f"background {result['background_s']}s: peak {result['background_peak']:.3f}, "
-        f"{result['false_watch_per_hour']} false WATCH/camera-hour",
+        (
+            f"aggressive minus benign peak: {result['separation']:+.3f} "
+            f"(coarse-geometry baseline {result['geometry_separation']:+.3f})"
+        ),
+        (
+            f"background {result['background_s']}s: peak {result['background_peak']:.3f}, "
+            f"{result['false_watch_per_hour']} false WATCH/camera-hour"
+        ),
         "",
         "lead time before each aggressive onset:",
     ]

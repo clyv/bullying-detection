@@ -100,7 +100,7 @@ def extract(
     if not capture.isOpened():
         raise OSError(f"found {video} but OpenCV could not decode it — unsupported codec?")
     src_fps = capture.get(cv2.CAP_PROP_FPS) or 30.0
-    step = max(1, int(round(src_fps / max(process_fps, 1e-6))))
+    step = max(1, round(src_fps / max(process_fps, 1e-6)))
 
     slots = SlotAssigner(max_people)
     kp_frames, sc_frames, id_frames = [], [], []
@@ -139,14 +139,16 @@ def extract(
     finally:
         capture.release()
 
-    return dict(
-        keypoints=np.stack(kp_frames) if kp_frames else np.zeros((0, max_people, 17, 2), "float32"),
-        scores=np.stack(sc_frames) if sc_frames else np.zeros((0, max_people, 17), "float32"),
-        track_ids=np.stack(id_frames) if id_frames else np.zeros((0, max_people), "int32"),
-        fps=np.float32(src_fps / step),
-        source_fps=np.float32(src_fps),
-        n_tracks=np.int32(slots.switches()),
-    )
+    return {
+        "keypoints": np.stack(kp_frames)
+        if kp_frames
+        else np.zeros((0, max_people, 17, 2), "float32"),
+        "scores": np.stack(sc_frames) if sc_frames else np.zeros((0, max_people, 17), "float32"),
+        "track_ids": np.stack(id_frames) if id_frames else np.zeros((0, max_people), "int32"),
+        "fps": np.float32(src_fps / step),
+        "source_fps": np.float32(src_fps),
+        "n_tracks": np.int32(slots.switches()),
+    }
 
 
 def main() -> None:

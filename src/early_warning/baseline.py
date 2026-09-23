@@ -132,12 +132,12 @@ class HeuristicHazard:
         # horizon accepts posture alone, because that is all there is early on.
         hazard_5s = np.clip(0.85 * build + 0.35 * pre + 0.30 * shove, 0.0, 1.0)
         hazard_10s = np.clip(0.60 * build + 0.70 * pre, 0.0, 1.0)
-        return dict(
-            precursor=pre,
-            buildup=build,
-            hazard_5s=hazard_5s,
-            hazard_10s=np.maximum(hazard_10s, hazard_5s),  # 10 s includes the next 5
-        )
+        return {
+            "precursor": pre,
+            "buildup": build,
+            "hazard_5s": hazard_5s,
+            "hazard_10s": np.maximum(hazard_10s, hazard_5s),  # 10 s includes the next 5
+        }
 
 
 class WindowHazard:

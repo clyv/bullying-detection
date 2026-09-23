@@ -1,0 +1,9 @@
+# Development and CI tooling. Install alongside requirements.txt:
+#     pip install -r requirements-dev.txt
+#
+# ruff is pinned to one exact version and CI installs this same file. Ruff moves
+# rules into its default set between releases, so a local copy even a few minor
+# versions behind reports a clean tree while CI reports dozens of errors on code
+# nobody touched. Bump this deliberately, and run `ruff check .` right after.
+ruff==0.16.7
+pytest==8.3.4

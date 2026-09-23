@@ -261,7 +261,6 @@ def leave_one_out(cfg, device, resume_index=0, ckpt_path=None, stream="joint"):
 
     from src.datasets.augment import AugmentConfig
     from src.datasets.unified_loader import split_indices
-
     from src.evaluation.baselines import fit_energy_threshold, threshold_accuracy
 
     specs = specs_from_config(cfg)

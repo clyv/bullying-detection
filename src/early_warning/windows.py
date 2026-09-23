@@ -118,7 +118,7 @@ def group_split(
     videos = np.unique(ws.video_id)
     rng = np.random.default_rng(seed)
     rng.shuffle(videos)
-    n_val = max(1, int(round(len(videos) * val_frac)))
+    n_val = max(1, round(len(videos) * val_frac))
     val_videos = set(videos[:n_val].tolist())
     is_val = np.array([v in val_videos for v in ws.video_id])
     return ~is_val, is_val
