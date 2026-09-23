@@ -156,7 +156,7 @@ Check for bias across children's body proportions, dense crowds, wheelchair user
 
 | # | Task | Acceptance |
 |---|---|---|
-| 1 | Run `tracked_pose.py` + `replay.py` on UT-Interaction `seq1` | Signals plotted over the clip peak at its known punch/kick/push moments; ID-switch count logged |
+| 1 | ~~Run `tracked_pose.py` + `replay.py` on UT-Interaction `seq1`~~ **done — see §8.1** | Signals plotted over the clip peak at its known punch/kick/push moments; ID-switch count logged |
 | 2 | UBI-Fights whole-video extraction and loader | Per-dataset counts of event and censored windows; five videos spot-checked by eye |
 | 3 | Baseline table | `geometry_hazard`, motion energy, min pair distance, largest group, AGCN-as-anticipation, scored with `metrics.py` |
 | 4 | `WindowHazard` leave-one-dataset-out | Beats every baseline by the Stage 0 criterion, or the signals get fixed first |
@@ -164,6 +164,47 @@ Check for bias across children's body proportions, dense crowds, wheelchair user
 | 6 | Annotation pass (150–300 videos) | Kappa reported; de-escalated episodes included |
 | 7 | `EscalationNet` | Beats Stage 0 leave-one-dataset-out, or is dropped |
 | 8 | Shadow mode | Two to four weeks, no alerts, per-camera thresholds from that camera's own footage |
+
+### 8.1 First run on real footage — UT-Interaction seq1
+
+68 s, 677 steps at 10 fps, mean pose quality 0.88, 3 track ids for 2 actors and
+one passer-by (no ID churn). Reproduce with
+`python -m src.early_warning.validate_ut --poses outputs/ut_seq1_tracked.npz`.
+
+| interaction | window | peak 5 s | peak 10 s | tier |
+|---|---|---|---|---|
+| **punch** | 25.4–28.0 s | 0.340 | 0.589 | WATCH |
+| **kick** | 30.6–33.6 s | 0.339 | 0.677 | WATCH |
+| hug | 35.4–40.2 s | 0.522 | 0.697 | WATCH |
+| point (2nd pair) | 41.6–45.3 s | 0.000 | 0.000 | CALM |
+| point | 43.7–46.9 s | 0.000 | 0.000 | CALM |
+| handshake | 46.9–52.0 s | 0.345 | 0.690 | WATCH |
+| **push** | 53.1–55.8 s | 0.654 | 0.868 | WARN |
+
+The pipeline runs end to end on real video, and all three assaults score above
+CALM. Everything else here is a failure, and each one is specific:
+
+1. **The hazard is a proximity detector.** A hug (0.697) and a handshake (0.690)
+   both outscore a punch (0.589). Aggressive minus benign is +0.365, against
+   +0.247 for the coarse-geometry baseline — a +0.118 margin for the entire
+   social-feature stack over "how far apart are they". That is the Ganesh result
+   reproduced in miniature, and it fails the Stage 0 criterion in §6.
+2. **Pointing scores exactly zero, twice.** The phase-1 precursor — hostile
+   gesturing at a distance — is invisible, because `gesture_close_still` and
+   `arm_raise_close` are gated on close range. A gesture term that only counts
+   when the pair is already adjacent cannot be a precursor feature.
+3. **Only one assault had a pre-onset alarm.** The punch got a fresh WATCH 10.4 s
+   early, which is most likely the actors walking into frame, not build-up. The
+   kick and the push had none: the hazard fell below threshold in the gap between
+   interactions and did not recover until contact. No WARN ever preceded an onset.
+4. **The false-alarm rate is far outside budget.** One WATCH episode in 32 s of
+   walking extrapolates to ~112/camera-hour against a 2/camera-hour target. One
+   sequence is far too small to estimate this, but the direction is not in doubt.
+
+The top signals separating assault windows from background are `largest_group`,
+`n_people` and `max_mutual_facing` — that is, "two people are near each other and
+looking at one another", which is true of every interaction in the corpus. Fix
+the gesture gating and the facing/closing asymmetry before step 3, not after.
 
 ## 9. Risks and open questions
 

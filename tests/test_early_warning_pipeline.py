@@ -215,6 +215,24 @@ def test_reasons_rank_by_significance_not_raw_magnitude():
     assert "target enclosed by others" in top_reasons(signals, 0, k=2)
 
 
+def test_ut_validation_separates_a_scripted_approach_from_standing_apart(tmp_path):
+    """The validation harness should score a labelled 'aggressive' window above a
+    benign one when the footage actually differs there."""
+    from src.early_warning.validate_ut import evaluate, report
+
+    kp, sc = scene(_calm(60) + _closing(60))  # 12 s: calm, then a closing approach
+    path = tmp_path / "poses.npz"
+    np.savez_compressed(path, keypoints=kp, scores=sc, fps=np.float32(FPS))
+    # Spreadsheet frame numbers are at 30 fps; the replay runs at 10, so x3.
+    events = [(0, "handshake", 30, 150), (4, "punch", 240, 345)]
+
+    result = evaluate(str(path), events)
+    assert [r["name"] for r in result["events"]] == ["handshake", "punch"]
+    assert result["separation"] > 0  # the approach outscores the standing pair
+    assert result["leads"][0]["name"] == "punch"  # only aggressive rows get leads
+    assert "punch" in report(result)
+
+
 def test_replay_stays_calm_on_calm_footage():
     bundle = compute(*scene(_calm(60)), FeatureConfig(fps=FPS))
     hazard = HeuristicHazard(fps=FPS)(bundle.signals)

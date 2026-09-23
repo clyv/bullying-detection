@@ -223,6 +223,21 @@ tiered by what a human is asked to do — WATCH highlights a camera and notifies
 nobody, WARN asks someone to go and supervise — because the criminology is clear
 that most confrontations never become violent.
 
+Before trusting any of it, check the signals against labelled footage. UT-Interaction
+`seq1` is one continuous take containing three aggressive and three benign
+interactions with frame-accurate boundaries, which separates *"the hazard rises
+before a punch"* from *"the hazard rises whenever two people stand close together"*:
+
+```
+python -m src.early_warning.validate_ut --poses outputs/ut_seq1_tracked.npz --sequence seq1
+```
+
+The first run says the second thing. A hug (peak 0.697) and a handshake (0.690)
+both outscore a punch (0.589); pointing scores exactly 0.000; and the whole
+social-feature stack beats a coarse-geometry baseline by +0.118 on
+aggressive-minus-benign separation. Results and the four specific defects are in
+[§8.1 of the design doc](docs/EARLY_WARNING_DESIGN.md).
+
 ## Roadmap
 
 - [x] **Phase 1 — Baseline:** pose-extraction pipeline (YOLO-Pose) + ST-GCN baseline (training & evaluation) on UT-Interaction / RWF-2000
